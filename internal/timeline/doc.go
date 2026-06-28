@@ -2,7 +2,7 @@
 // the append-only record of every accepted event (and event_rejected entries),
 // queried for the dashboard timeline and deterministic replay.
 //
-// Owner: timeline Builder.
-// Depends on: contracts/events.
-// Must NOT: mutate events — the log is append-only.
+// Owner: Poolside Laguna M (timeline lane taken in HANDOFF.md §3).
+// Depends on: contracts/{events,interfaces}.
+// Must NOT: mutate events — the log is append-only; does not own world state.
 package timeline
