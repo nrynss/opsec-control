@@ -189,7 +189,7 @@ func TestFanOut_CommanderReceivesPeers(t *testing.T) {
 	}
 }
 
-func TestFanOut_EmptyWakeList(t *testing.T) {
+func TestFanOut_EmptyWakeList_NoCommander(t *testing.T) {
 	engine := NewEngine(map[contracts.CellKind]contracts.Cell{})
 
 	cop, err := engine.FanOut(context.Background(), makeSnapshot(5), makeTrigger(), nil)
@@ -203,6 +203,35 @@ func TestFanOut_EmptyWakeList(t *testing.T) {
 
 	if cop.OverallRisk != contracts.RiskLow {
 		t.Errorf("expected RiskLow for empty wake, got %s", cop.OverallRisk)
+	}
+}
+
+func TestFanOut_EmptyWakeList_WithCommander(t *testing.T) {
+	commander := newMockCell(contracts.CellCommander, "Global synthesized COP", contracts.RiskHigh)
+	cells := map[contracts.CellKind]contracts.Cell{
+		contracts.CellCommander: commander,
+	}
+	engine := NewEngine(cells)
+
+	cop, err := engine.FanOut(context.Background(), makeSnapshot(12), makeTrigger(), nil)
+	if err != nil {
+		t.Fatalf("FanOut with empty wake and Commander failed: %v", err)
+	}
+
+	if cop.StateVersion != 12 {
+		t.Errorf("expected stateVersion 12, got %d", cop.StateVersion)
+	}
+
+	if cop.OverallRisk != contracts.RiskHigh {
+		t.Errorf("expected RiskHigh from Commander, got %s", cop.OverallRisk)
+	}
+
+	if cop.Summary != "Global synthesized COP" {
+		t.Errorf("expected Commander summary, got %q", cop.Summary)
+	}
+
+	if commander.callCount.Load() != 1 {
+		t.Errorf("expected Commander to be invoked exactly once, got %d", commander.callCount.Load())
 	}
 }
 

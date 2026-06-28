@@ -51,13 +51,6 @@ type cellResult struct {
 // FanOut returns ctx.Err() promptly rather than blocking until every cell
 // finishes on its own.
 func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trigger contracts.Event, wake []contracts.CellKind) (contracts.CommonOperationalPicture, error) {
-	if len(wake) == 0 {
-		return contracts.CommonOperationalPicture{
-			Summary:      "No cells woken for this event.",
-			StateVersion: snapshot.Version,
-			OverallRisk:  contracts.RiskLow,
-		}, nil
-	}
 
 	// Filter out the Commander — it runs after specialists, not in parallel
 	// with them. The Commander ALWAYS synthesises when registered, regardless
@@ -134,6 +127,13 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 	// --- Phase 2: Commander synthesis ---
 	commander, hasCommander := e.cells[contracts.CellCommander]
 	if !hasCommander {
+		if len(specialistOutputs) == 0 {
+			return contracts.CommonOperationalPicture{
+				Summary:      "No cells woken for this event.",
+				StateVersion: snapshot.Version,
+				OverallRisk:  contracts.RiskLow,
+			}, nil
+		}
 		// No Commander registered — return a best-effort COP from specialist outputs.
 		return buildFallbackCOP(snapshot, specialistOutputs, nil), nil
 	}
