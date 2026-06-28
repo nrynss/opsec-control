@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/rocknarayan/opsec-control/internal/contracts"
+	"github.com/nrynss/opsec-control/internal/contracts"
 )
 
 // roundJSON marshals v, unmarshals into a fresh value of the same type, and
