@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
@@ -19,22 +22,27 @@ import (
 
 // Client implements contracts.LLMClient using the Cerebras API.
 type Client struct {
-	apiKey     string
-	baseURL    string
-	model      string
-	client     *http.Client
-	maxRetries int
-	backoff    time.Duration
+	apiKey         string
+	baseURL        string
+	model          string
+	client         *http.Client
+	maxRetries     int
+	backoff        time.Duration
+	maxConcurrency int
+	sem            chan struct{}
+	rand           *rand.Rand
+	randMu         sync.Mutex
 }
 
 // Config holds configuration parameters for the Cerebras client.
 type Config struct {
-	APIKey     string
-	BaseURL    string
-	Model      string
-	HTTPClient *http.Client
-	MaxRetries int
-	Backoff    time.Duration
+	APIKey         string
+	BaseURL        string
+	Model          string
+	HTTPClient     *http.Client
+	MaxRetries     int
+	Backoff        time.Duration
+	MaxConcurrency int
 }
 
 // NewClient creates a new Cerebras LLM client.
@@ -81,13 +89,24 @@ func NewClient(cfg Config) *Client {
 		backoff = 500 * time.Millisecond
 	}
 
+	maxConcurrency := cfg.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = 4 // Measured concurrency ceiling
+	}
+
+	sem := make(chan struct{}, maxConcurrency)
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
 	return &Client{
-		apiKey:     apiKey,
-		baseURL:    baseURL,
-		model:      model,
-		client:     httpClient,
-		maxRetries: maxRetries,
-		backoff:    backoff,
+		apiKey:         apiKey,
+		baseURL:        baseURL,
+		model:          model,
+		client:         httpClient,
+		maxRetries:     maxRetries,
+		backoff:        backoff,
+		maxConcurrency: maxConcurrency,
+		sem:            sem,
+		rand:           r,
 	}
 }
 
@@ -179,6 +198,45 @@ type chatCompletionResponse struct {
 	} `json:"time_info"`
 }
 
+func (c *Client) getBackoff(attempt int, retryAfterHeader string) time.Duration {
+	if retryAfterHeader != "" {
+		if d, ok := parseRetryAfter(retryAfterHeader, time.Now()); ok {
+			return d
+		}
+	}
+
+	// Exponential backoff: BaseBackoff * 2^attempt
+	temp := float64(c.backoff) * math.Pow(2, float64(attempt))
+	maxBackoff := 10 * time.Second
+	if temp > float64(maxBackoff) {
+		temp = float64(maxBackoff)
+	}
+
+	c.randMu.Lock()
+	defer c.randMu.Unlock()
+
+	// Jitter: +/- 50%
+	half := temp / 2
+	jitter := c.rand.Float64() * half
+	return time.Duration(half + jitter)
+}
+
+func parseRetryAfter(header string, now time.Time) (time.Duration, bool) {
+	if header == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(header); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second, true
+	}
+	if t, err := http.ParseTime(header); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d, true
+		}
+		return 0, true
+	}
+	return 0, false
+}
+
 func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (contracts.LLMResponse, error) {
 	messages := make([]chatMessage, 0, 2)
 	if req.System != "" {
@@ -213,11 +271,25 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 	var httpResp *http.Response
 	var bodyBytes []byte
 	var duration time.Duration
-	currentBackoff := c.backoff
 
-	for attempt := 0; attempt < c.maxRetries; attempt++ {
+	totalAttempts := c.maxRetries + 1
+
+	for attempt := 0; attempt < totalAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return contracts.LLMResponse{}, err
+		}
+
+		// Acquire concurrency semaphore with context
+		select {
+		case c.sem <- struct{}{}:
+			// Acquired
+		case <-ctx.Done():
+			return contracts.LLMResponse{}, ctx.Err()
+		}
+
 		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBytes))
 		if err != nil {
+			<-c.sem // Release semaphore
 			return contracts.LLMResponse{}, fmt.Errorf("create HTTP request: %w", err)
 		}
 
@@ -229,45 +301,62 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 		duration = time.Since(startTime)
 
 		if err != nil {
-			if attempt == c.maxRetries-1 {
-				return contracts.LLMResponse{}, fmt.Errorf("HTTP request failed (after %d attempts): %w", c.maxRetries, err)
+			<-c.sem // Release semaphore
+
+			if ctx.Err() != nil {
+				return contracts.LLMResponse{}, ctx.Err()
 			}
+
+			if attempt == totalAttempts-1 {
+				return contracts.LLMResponse{}, fmt.Errorf("HTTP request failed (after %d attempts): %w", totalAttempts, err)
+			}
+
+			sleepDur := c.getBackoff(attempt, "")
 			select {
 			case <-ctx.Done():
 				return contracts.LLMResponse{}, ctx.Err()
-			case <-time.After(currentBackoff):
+			case <-time.After(sleepDur):
 			}
-			currentBackoff *= 2
 			continue
 		}
 
 		bodyBytes, err = io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
+
+		<-c.sem // Release semaphore
+
 		if err != nil {
-			if attempt == c.maxRetries-1 {
-				return contracts.LLMResponse{}, fmt.Errorf("read response body: %w", err)
+			if attempt == totalAttempts-1 {
+				return contracts.LLMResponse{}, fmt.Errorf("read response body (after %d attempts): %w", totalAttempts, err)
 			}
+			sleepDur := c.getBackoff(attempt, "")
 			select {
 			case <-ctx.Done():
 				return contracts.LLMResponse{}, ctx.Err()
-			case <-time.After(currentBackoff):
+			case <-time.After(sleepDur):
 			}
-			currentBackoff *= 2
 			continue
 		}
 
 		// Retry on transient status codes (429 Too Many Requests, or 5xx Server Errors)
 		if httpResp.StatusCode == http.StatusTooManyRequests || httpResp.StatusCode >= 500 {
-			if attempt == c.maxRetries-1 {
-				return contracts.LLMResponse{}, fmt.Errorf("API error (status %d) after %d attempts: %s", httpResp.StatusCode, c.maxRetries, string(bodyBytes))
+			if attempt == totalAttempts-1 {
+				return contracts.LLMResponse{}, fmt.Errorf("API error (status %d) after %d attempts: %s", httpResp.StatusCode, totalAttempts, string(bodyBytes))
 			}
+
+			retryAfter := httpResp.Header.Get("Retry-After")
+			sleepDur := c.getBackoff(attempt, retryAfter)
 			select {
 			case <-ctx.Done():
 				return contracts.LLMResponse{}, ctx.Err()
-			case <-time.After(currentBackoff):
+			case <-time.After(sleepDur):
 			}
-			currentBackoff *= 2
 			continue
+		}
+
+		// Fail fast on terminal 4xx errors
+		if httpResp.StatusCode >= 400 && httpResp.StatusCode < 500 {
+			return contracts.LLMResponse{}, fmt.Errorf("API terminal error (status %d): %s", httpResp.StatusCode, string(bodyBytes))
 		}
 
 		if httpResp.StatusCode != http.StatusOK {

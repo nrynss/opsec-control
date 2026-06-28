@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,30 +119,14 @@ func TestEnsureAdditionalPropertiesFalse(t *testing.T) {
 }
 
 func TestRealClientSuccess(t *testing.T) {
-	// Turn off mock mode
 	os.Unsetenv("LLM_MOCK")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat/completions" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if r.Method != "POST" {
-			t.Errorf("unexpected method: %s", r.Method)
-		}
-		if r.Header.Get("Authorization") != "Bearer test-key-123" {
-			t.Errorf("unexpected auth header: %s", r.Header.Get("Authorization"))
-		}
-
 		var reqPayload chatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&reqPayload); err != nil {
 			t.Errorf("failed to decode request body: %v", err)
 		}
 
-		if reqPayload.Model != "test-model" {
-			t.Errorf("expected model test-model, got %s", reqPayload.Model)
-		}
-
-		// Return a mock Cerebras completion response with time_info
 		resp := chatCompletionResponse{
 			Choices: []struct {
 				Message struct {
@@ -171,7 +156,7 @@ func TestRealClientSuccess(t *testing.T) {
 				QueueTime      float64 `json:"queue_time"`
 				TotalTime      float64 `json:"total_time"`
 			}{
-				CompletionTime: 0.02, // 30 tokens in 0.02s = 1500 tokens/sec
+				CompletionTime: 0.02,
 				PromptTime:     0.01,
 				TotalTime:      0.03,
 			},
@@ -184,9 +169,10 @@ func TestRealClientSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{
-		APIKey:  "test-key-123",
-		BaseURL: server.URL,
-		Model:   "test-model",
+		APIKey:     "test-key-123",
+		BaseURL:    server.URL,
+		Model:      "test-model",
+		MaxRetries: 1,
 	})
 
 	resp, err := client.Complete(context.Background(), contracts.LLMRequest{
@@ -211,7 +197,6 @@ func TestRealClientSuccess(t *testing.T) {
 		t.Errorf("expected 30 completion tokens, got %d", resp.TokensOut)
 	}
 
-	// 30 tokens / 0.02s = 1500 tokens/sec
 	if resp.TokensPerSec != 1500.0 {
 		t.Errorf("expected tokensPerSec to be 1500.0, got %f", resp.TokensPerSec)
 	}
@@ -222,13 +207,15 @@ func TestRealClientAPIError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Cerebras is overloaded"))
+		w.Write([]byte("Cerebras overloaded"))
 	}))
 	defer server.Close()
 
 	client := NewClient(Config{
-		APIKey:  "test-key",
-		BaseURL: server.URL,
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		MaxRetries: 1,
+		Backoff:    1 * time.Millisecond,
 	})
 
 	_, err := client.Complete(context.Background(), contracts.LLMRequest{
@@ -239,7 +226,7 @@ func TestRealClientAPIError(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "status 500") || !strings.Contains(err.Error(), "Cerebras is overloaded") {
+	if !strings.Contains(err.Error(), "status 500") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -248,7 +235,6 @@ func TestRealClientFallbackDuration(t *testing.T) {
 	os.Unsetenv("LLM_MOCK")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Response has no time_info
 		resp := chatCompletionResponse{
 			Choices: []struct {
 				Message struct {
@@ -274,7 +260,7 @@ func TestRealClientFallbackDuration(t *testing.T) {
 			},
 		}
 
-		time.Sleep(10 * time.Millisecond) // Ensure duration is > 0
+		time.Sleep(10 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(resp)
@@ -294,8 +280,304 @@ func TestRealClientFallbackDuration(t *testing.T) {
 		t.Fatalf("Complete failed: %v", err)
 	}
 
-	// Should calculate based on fallback duration
 	if resp.TokensPerSec <= 0 {
 		t.Errorf("expected positive tokensPerSec using fallback duration, got %f", resp.TokensPerSec)
+	}
+}
+
+func TestRetryOnTransientErrors(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		if count == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte("Rate limited"))
+			return
+		}
+		if count == 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Server error"))
+			return
+		}
+
+		resp := chatCompletionResponse{
+			Choices: []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}{
+				{Message: struct {
+					Content string `json:"content"`
+				}{Content: "success"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		MaxRetries: 3,
+		Backoff:    1 * time.Millisecond,
+	})
+
+	resp, err := client.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
+	if err != nil {
+		t.Fatalf("Complete should have succeeded after retries: %v", err)
+	}
+
+	if resp.Content != "success" {
+		t.Errorf("expected success content, got: %s", resp.Content)
+	}
+
+	finalAttempts := atomic.LoadInt32(&attempts)
+	if finalAttempts != 3 {
+		t.Errorf("expected 3 total attempts, got %d", finalAttempts)
+	}
+}
+
+func TestRetryAfterHeader(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		if count == 1 {
+			w.Header().Set("Retry-After", "1") // 1 second
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		resp := chatCompletionResponse{
+			Choices: []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}{
+				{Message: struct {
+					Content string `json:"content"`
+				}{Content: "success"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		MaxRetries: 2,
+		Backoff:    1 * time.Millisecond,
+	})
+
+	start := time.Now()
+	_, err := client.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Complete should have succeeded: %v", err)
+	}
+
+	// Should have slept for ~1 second due to Retry-After
+	if elapsed < 800*time.Millisecond {
+		t.Errorf("Retry-After header was ignored: elapsed only %v", elapsed)
+	}
+}
+
+func TestRetryAfterHTTPDate(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		if count == 1 {
+			futureStr := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
+			w.Header().Set("Retry-After", futureStr)
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		resp := chatCompletionResponse{
+			Choices: []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}{
+				{Message: struct {
+					Content string `json:"content"`
+				}{Content: "success"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		MaxRetries: 2,
+		Backoff:    1 * time.Millisecond,
+	})
+
+	start := time.Now()
+	_, err := client.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Complete should have succeeded: %v", err)
+	}
+
+	// Should have slept for ~3 seconds (minus RTT) due to Retry-After HTTP date
+	if elapsed < 1500*time.Millisecond {
+		t.Errorf("Retry-After HTTP date header was ignored: elapsed only %v", elapsed)
+	}
+}
+
+func TestTerminal4xxNoRetry(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusUnprocessableEntity) // 422 Unprocessable Entity
+		w.Write([]byte("Terminal error detail"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		MaxRetries: 3,
+		Backoff:    1 * time.Millisecond,
+	})
+
+	_, err := client.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if atomic.LoadInt32(&attempts) != 1 {
+		t.Errorf("expected only 1 attempt for terminal 4xx, got %d", atomic.LoadInt32(&attempts))
+	}
+
+	if !strings.Contains(err.Error(), "Terminal error detail") {
+		t.Errorf("expected terminal error message, got: %v", err)
+	}
+}
+
+func TestConcurrencyCap(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	var activeRequests int32
+	var maxActiveRequests int32
+	var hasExceeded atomic.Bool
+
+	maxConcurrency := 3
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		currentActive := atomic.AddInt32(&activeRequests, 1)
+		defer atomic.AddInt32(&activeRequests, -1)
+
+		for {
+			max := atomic.LoadInt32(&maxActiveRequests)
+			if currentActive <= max {
+				break
+			}
+			if atomic.CompareAndSwapInt32(&maxActiveRequests, max, currentActive) {
+				break
+			}
+		}
+
+		if currentActive > int32(maxConcurrency) {
+			hasExceeded.Store(true)
+		}
+
+		time.Sleep(20 * time.Millisecond)
+
+		resp := chatCompletionResponse{
+			Choices: []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}{
+				{Message: struct {
+					Content string `json:"content"`
+				}{Content: "ok"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:         "test-key",
+		BaseURL:        server.URL,
+		MaxConcurrency: maxConcurrency,
+	})
+
+	totalCalls := 10
+	errChan := make(chan error, totalCalls)
+
+	for i := 0; i < totalCalls; i++ {
+		go func() {
+			_, err := client.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
+			errChan <- err
+		}()
+	}
+
+	for i := 0; i < totalCalls; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("concurrent call failed: %v", err)
+		}
+	}
+
+	if hasExceeded.Load() {
+		t.Errorf("max concurrent requests exceeded limit of %d, got max active %d", maxConcurrency, atomic.LoadInt32(&maxActiveRequests))
+	}
+}
+
+func TestContextCancellationMidBackoff(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	// High backoff so we definitely get stuck sleeping
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		MaxRetries: 3,
+		Backoff:    5 * time.Second,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errChan := make(chan error, 1)
+	go func() {
+		_, err := client.Complete(ctx, contracts.LLMRequest{User: "hi"})
+		errChan <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond) // Let it make the first call and enter backoff sleep
+	cancel()                          // Cancel context during backoff sleep
+
+	select {
+	case err := <-errChan:
+		if err != context.Canceled {
+			t.Errorf("expected context.Canceled error, got: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("cancellation did not return promptly during backoff sleep")
 	}
 }

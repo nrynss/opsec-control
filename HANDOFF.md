@@ -38,7 +38,7 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/events` | **implemented by Codex Builder** | event bus |
 | `internal/anomaly` | **implemented by Grok Builder** (Classifier via §0.5 w/ orchestrator) | fan-out triggers |
 | `internal/orchestrator` | **implemented by Antigravity Builder** | concurrent fan-out + Commander |
-| `internal/agents` | stub | the six Cells |
+| `internal/agents` | **implemented (Gemma 4 31B on Cerebras Builder)** | the six Cells |
 | `internal/llm` | **implemented by Antigravity Builder** | Cerebras client |
 | `internal/simulation` + `scenario` | **implemented by Grok Builder** | sim clock + replay |
 | `internal/scenariogen` (+`cmd`) | stub | offline compiler |
@@ -87,6 +87,7 @@ task docker:build    # Linux image — the build authority (§19.3)
   `.gitattributes`.
 - **No shared mutable global state (§0.2 r4):** only `internal/state` holds live
   world state, and it has one mutator path (`StateStore.Apply`).
+- **Cerebras Concurrency Limit Warning:** The developer account has a strict **concurrency ceiling of 4 concurrent in-flight requests** (100 RPM / 100k TPM). Because the MVD uses 4 Cells (Infrastructure, Medical, Population, Commander), any multi-turn loops (such as plan->critique->refine) executing in parallel *will* hit HTTP 429s. The LLM client handles this gracefully via internal queueing and backoff/retry, but orchestrator/agent builders should be aware of this tight concurrency budget.
 
 ## 7. Definition of done (SPEC §0 / §19.3)
 
