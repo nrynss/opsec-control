@@ -1,9 +1,9 @@
 {
-  "name": "former-field",
+  "name": "cerebro-eoc-dashboard",
   "type": "module",
   "version": "0.0.1",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=25.9.0"
   },
   "scripts": {
     "dev": "astro dev",

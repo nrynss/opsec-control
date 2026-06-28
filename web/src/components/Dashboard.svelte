@@ -178,22 +178,30 @@
     }
   }
 
-  function handleIncomingData(data) {
-    // Add raw data string to Matrix log
-    addLog("CEREBRAS", JSON.stringify(data));
+  function handleIncomingData(msg) {
+    var kind = null;
+    var payload = msg;
 
-    // Handle WorldState updates
-    if (data.sectors && data.bridges) {
-      state = data;
+    // Check if it has the envelope structure {kind: ..., payload: ...}
+    if (msg && typeof msg === 'object' && 'kind' in msg && 'payload' in msg) {
+      kind = msg.kind;
+      payload = msg.payload;
+    }
+
+    // Add to Matrix logs
+    addLog(kind ? `WS:${kind.toUpperCase()}` : "CEREBRAS", JSON.stringify(payload));
+
+    // Route based on explicit kind if present, otherwise fallback to duck-typing
+    if (kind === "state" || (!kind && payload.sectors && payload.bridges)) {
+      state = payload;
       return;
     }
 
-    // Handle CommonOperationalPicture updates
-    if (data.overallRisk && data.prioritizedActions) {
-      cop = data;
+    if (kind === "cop" || (!kind && payload.overallRisk && payload.prioritizedActions)) {
+      cop = payload;
       metrics.activeCells = 0; // Reset HUD indicator
-      if (data.cellOutputs) {
-        data.cellOutputs.forEach(out => {
+      if (payload.cellOutputs) {
+        payload.cellOutputs.forEach(out => {
           cellStatuses[out.agent] = "done";
           cellData[out.agent] = out;
         });
@@ -201,21 +209,14 @@
       return;
     }
 
-    // Handle single CellOutput
-    if (data.agent && data.recommendations) {
-      cellStatuses[data.agent] = "done";
-      cellData[data.agent] = data;
+    if (kind === "cell_output" || (!kind && payload.agent && payload.recommendations)) {
+      cellStatuses[payload.agent] = "done";
+      cellData[payload.agent] = payload;
       return;
     }
 
-    // Handle Events
-    if (data.id && data.type) {
-      timelineEvents = [data, ...timelineEvents];
-      
-      // Update state version
-      if (state.version < data.timestamp) {
-        state.version = data.timestamp;
-      }
+    if (kind === "event" || (!kind && payload.id && payload.type)) {
+      timelineEvents = [payload, ...timelineEvents];
     }
   }
 
@@ -426,7 +427,7 @@
 
 <div class="dashboard-container">
   <!-- Top HUD panel -->
-  <HUD {state} {metrics} />
+  <HUD {state} {metrics} {demoMode} />
 
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">

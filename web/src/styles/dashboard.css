@@ -94,6 +94,40 @@ body {
   box-shadow: 0 0 8px #00f2fe;
 }
 
+.hud-badge {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05rem;
+}
+
+.hud-badge.demo {
+  background: rgba(255, 102, 0, 0.12);
+  color: var(--color-high);
+  border: 1px solid rgba(255, 102, 0, 0.3);
+  animation: pulse-badge-demo 1.5s infinite alternate;
+}
+
+.hud-badge.live {
+  background: rgba(0, 255, 135, 0.12);
+  color: var(--color-nominal);
+  border: 1px solid rgba(0, 255, 135, 0.3);
+  animation: pulse-badge-live 1.5s infinite alternate;
+}
+
+@keyframes pulse-badge-demo {
+  from { box-shadow: 0 0 2px rgba(255, 102, 0, 0.1); }
+  to { box-shadow: 0 0 10px rgba(255, 102, 0, 0.3); }
+}
+
+@keyframes pulse-badge-live {
+  from { box-shadow: 0 0 2px rgba(0, 255, 135, 0.1); }
+  to { box-shadow: 0 0 10px rgba(0, 255, 135, 0.3); }
+}
+
 .hud-metrics {
   display: flex;
   gap: 24px;

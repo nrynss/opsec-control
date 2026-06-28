@@ -2,6 +2,7 @@
 <script>
   export var state = {};
   export var metrics = {};
+  export var demoMode = true;
 
   function formatTime(simTime) {
     var baseHour = 9;
@@ -16,8 +17,13 @@
 </script>
 
 <div class="hud-strip">
-  <div class="hud-logo">
+  <div class="hud-logo" style="display: flex; align-items: center;">
     <span>CEREBRO EOC</span>
+    {#if demoMode}
+      <span class="hud-badge demo">Offline / Demo</span>
+    {:else}
+      <span class="hud-badge live">Live / Connected</span>
+    {/if}
   </div>
 
   <div class="hud-metrics">
