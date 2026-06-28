@@ -62,7 +62,15 @@ func (e *Engine) Load(sc *contracts.Scenario) error {
 	e.paused = false
 	e.resumeCh = nil
 
-	// Interrupt any waiter in a concurrent Run()
+	// Interrupt any waiter in a concurrent Run() and allocate a fresh notification channel.
+	e.interruptResetLocked()
+	e.resetCh = make(chan struct{})
+	return nil
+}
+
+// interruptResetLocked closes the current resetCh (if open) under the assumption
+// that the caller already holds e.mu. A fresh channel will be assigned by the caller.
+func (e *Engine) interruptResetLocked() {
 	if e.resetCh != nil {
 		select {
 		case <-e.resetCh:
@@ -70,8 +78,6 @@ func (e *Engine) Load(sc *contracts.Scenario) error {
 			close(e.resetCh)
 		}
 	}
-	e.resetCh = make(chan struct{})
-	return nil
 }
 
 // Reset returns playback to the start of the current scenario (time 0, first event).
@@ -88,13 +94,7 @@ func (e *Engine) Reset() {
 	e.resumeCh = nil
 
 	// Wake any sleeper in Run() so it re-evaluates the new state.
-	if e.resetCh != nil {
-		select {
-		case <-e.resetCh:
-		default:
-			close(e.resetCh)
-		}
-	}
+	e.interruptResetLocked()
 	e.resetCh = make(chan struct{})
 }
 
@@ -156,15 +156,17 @@ func (e *Engine) Resume() {
 	}
 }
 
-// getResetCh returns a channel that is closed when Reset() or Load() is called.
-// Callers can select on it to be woken when playback state is externally reset.
+// getResetCh returns the current reset notification channel.
+// Callers should capture the returned channel and select on that specific value
+// (to observe a particular "generation" of reset).
 func (e *Engine) getResetCh() <-chan struct{} {
 	e.mu.Lock()
-	if e.resetCh == nil {
-		e.resetCh = make(chan struct{})
-	}
 	ch := e.resetCh
 	e.mu.Unlock()
+	if ch == nil {
+		// Should not normally happen; defensive.
+		ch = make(chan struct{})
+	}
 	return ch
 }
 
@@ -172,66 +174,76 @@ func (e *Engine) getResetCh() <-chan struct{} {
 // It sleeps between events proportional to (delta SimTime / speed).
 // While paused it waits for Resume or cancellation.
 //
-// After any wait (sleep or pause), Run always re-reads the *current* idx
-// under the lock. This prevents publishing stale events if Reset, Load,
-// Step (manual), Pause, or speed changes happen concurrently.
+// Design notes for correctness:
+//   - We snapshot the *resetCh* we are waiting on (a specific generation).
+//   - After waking from a reset, we continue the loop instead of publishing
+//     a potentially stale pre-sleep event.
+//   - After a timer, we re-check that idx is still what we expected before
+//     publishing (guards against manual Step(), Reset(), or Load() during wait).
 func (e *Engine) Run(ctx context.Context) error {
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		// Check for pause before deciding on next event.
+		// Check for pause.
 		e.mu.Lock()
 		paused := e.paused
 		resCh := e.resumeCh
 		e.mu.Unlock()
 
 		if paused {
+			resetCh := e.getResetCh()
 			select {
 			case <-resCh:
-				// resumed
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-e.getResetCh():
-				// Reset or Load happened; re-evaluate state below
+			case <-resetCh:
+				// Reset/Load interrupted the pause wait
 			}
 			continue
 		}
 
-		// Snapshot the *current* next event under lock. We will only act on
-		// this if nothing changes during the wait.
+		// Not paused. Capture current next event + the resetCh generation we will wait on.
 		e.mu.Lock()
 		if e.scenario == nil || e.idx >= len(e.scenario.Events) {
 			e.mu.Unlock()
 			return nil
 		}
-		nextEv := e.scenario.Events[e.idx]
+		nextIdx := e.idx
+		nextEv := e.scenario.Events[nextIdx]
 		delta := float64(nextEv.Timestamp - e.current)
 		sp := e.speed
+		resetCh := e.resetCh // snapshot the specific channel for this wait
 		e.mu.Unlock()
 
+		waitedForTime := true
 		if delta > 0 && sp > 0 {
 			sleep := time.Duration(delta/sp) * time.Second
 			timer := time.NewTimer(sleep)
 			select {
 			case <-timer.C:
+				// normal time to publish nextEv (if still valid)
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
-			case <-e.getResetCh():
+			case <-resetCh:
 				timer.Stop()
-				// state was reset during sleep; loop will pick up new idx
+				waitedForTime = false
+				// A Reset or Load happened. Do not publish the old event.
 			}
 		}
 
-		// After the wait, *re-acquire the lock* and publish whatever is
-		// currently at e.idx. This eliminates the stale-idx race where
-		// Reset/Step/etc. happened during the sleep.
+		if !waitedForTime {
+			continue // re-evaluate fresh state
+		}
+
+		// Time to publish. Re-check under lock that the idx we decided to
+		// advance is still the current one (someone may have stepped or reset).
 		e.mu.Lock()
-		if e.scenario == nil || e.idx >= len(e.scenario.Events) {
+		if e.scenario == nil || e.idx != nextIdx {
 			e.mu.Unlock()
-			return nil
+			continue
 		}
 		ev := e.scenario.Events[e.idx]
 		e.current = ev.Timestamp
