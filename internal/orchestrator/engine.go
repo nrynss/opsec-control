@@ -8,6 +8,10 @@ import (
 	"github.com/nrynss/opsec-control/internal/contracts"
 )
 
+// Compile-time interface assertion — catches signature drift at build time,
+// not at wiring time in cmd/eoc.
+var _ contracts.Orchestrator = (*Engine)(nil)
+
 // Engine implements contracts.Orchestrator. It is the ONLY place Cells are
 // invoked, and it does so concurrently — sequential invocation is a spec
 // violation (SPEC §1, §6).
@@ -16,9 +20,14 @@ type Engine struct {
 }
 
 // NewEngine creates a new orchestrator engine with the given set of Cells.
-// The Commander cell must be included in the cells map.
+// The caller's map is defensively copied; subsequent mutations to the original
+// map do not affect the Engine.
 func NewEngine(cells map[contracts.CellKind]contracts.Cell) *Engine {
-	return &Engine{cells: cells}
+	cp := make(map[contracts.CellKind]contracts.Cell, len(cells))
+	for k, v := range cells {
+		cp[k] = v
+	}
+	return &Engine{cells: cp}
 }
 
 // cellResult pairs a CellOutput with an error for channel-based collection.
@@ -37,6 +46,10 @@ type cellResult struct {
 //
 // The orchestrator reads a snapshot and Cells return data; it never mutates
 // world state (SPEC §6, §16.1).
+//
+// Context cancellation: if ctx is cancelled while specialists are running,
+// FanOut returns ctx.Err() promptly rather than blocking until every cell
+// finishes on its own.
 func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trigger contracts.Event, wake []contracts.CellKind) (contracts.CommonOperationalPicture, error) {
 	if len(wake) == 0 {
 		return contracts.CommonOperationalPicture{
@@ -46,7 +59,10 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 		}, nil
 	}
 
-	// Filter out the Commander — it runs after specialists, not in parallel with them.
+	// Filter out the Commander — it runs after specialists, not in parallel
+	// with them. The Commander ALWAYS synthesises when registered, regardless
+	// of whether it appears in the wake list (§6: "Commander synthesizes →
+	// COP + prioritized actions" is an unconditional phase-2 step).
 	var specialistKinds []contracts.CellKind
 	for _, k := range wake {
 		if k != contracts.CellCommander {
@@ -80,17 +96,33 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 		}(i, kind)
 	}
 
-	wg.Wait()
+	// Wait for all goroutines OR context cancellation, whichever comes first.
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All specialists finished — continue to collection.
+	case <-ctx.Done():
+		return contracts.CommonOperationalPicture{}, ctx.Err()
+	}
 
 	// Collect successful outputs; record errors but don't fail the whole fan-out
 	// if a single specialist errors (the Commander still synthesizes what's available).
 	var specialistOutputs []contracts.CellOutput
 	var errs []error
-	for _, r := range results {
+	for i, r := range results {
 		if r.err != nil {
 			errs = append(errs, r.err)
 			continue
 		}
+		// Stamp the StateVersion from the orchestrator's snapshot rather than
+		// trusting the cell's self-reported value (defense in depth).
+		r.output.StateVersion = snapshot.Version
+		r.output.Cell = specialistKinds[i]
 		specialistOutputs = append(specialistOutputs, r.output)
 	}
 
@@ -103,7 +135,7 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 	commander, hasCommander := e.cells[contracts.CellCommander]
 	if !hasCommander {
 		// No Commander registered — return a best-effort COP from specialist outputs.
-		return buildFallbackCOP(snapshot, specialistOutputs), nil
+		return buildFallbackCOP(snapshot, specialistOutputs, nil), nil
 	}
 
 	commanderInput := contracts.CellInput{
@@ -113,10 +145,11 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 		Peers:        specialistOutputs,
 	}
 
-	commanderOut, err := commander.Analyze(ctx, commanderInput)
-	if err != nil {
-		// Commander failed — still return a best-effort COP.
-		return buildFallbackCOP(snapshot, specialistOutputs), nil
+	commanderOut, cmdErr := commander.Analyze(ctx, commanderInput)
+	if cmdErr != nil {
+		// Commander failed — return a best-effort COP but surface the error in
+		// the summary so the failure is visible on the HUD (not silently swallowed).
+		return buildFallbackCOP(snapshot, specialistOutputs, cmdErr), nil
 	}
 
 	// Build the COP from the Commander's output.
@@ -139,8 +172,9 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 	return cop, nil
 }
 
-// buildFallbackCOP constructs a best-effort COP when the Commander is missing or failed.
-func buildFallbackCOP(snapshot contracts.WorldState, outputs []contracts.CellOutput) contracts.CommonOperationalPicture {
+// buildFallbackCOP constructs a best-effort COP when the Commander is missing
+// or failed. If cmdErr is non-nil, the failure is surfaced in the summary.
+func buildFallbackCOP(snapshot contracts.WorldState, outputs []contracts.CellOutput, cmdErr error) contracts.CommonOperationalPicture {
 	// Determine overall risk as the max across all specialist outputs.
 	overallRisk := contracts.RiskLow
 	riskOrder := map[contracts.RiskLevel]int{
@@ -155,8 +189,13 @@ func buildFallbackCOP(snapshot contracts.WorldState, outputs []contracts.CellOut
 		}
 	}
 
+	summary := "Automated COP — Commander unavailable."
+	if cmdErr != nil {
+		summary = fmt.Sprintf("Automated COP — Commander failed: %v", cmdErr)
+	}
+
 	return contracts.CommonOperationalPicture{
-		Summary:      "Automated COP — Commander unavailable.",
+		Summary:      summary,
 		StateVersion: snapshot.Version,
 		OverallRisk:  overallRisk,
 		CellOutputs:  outputs,

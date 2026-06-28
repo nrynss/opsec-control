@@ -15,10 +15,10 @@ import (
 // --- Mock Cell for testing ---
 
 type mockCell struct {
-	kind     contracts.CellKind
-	delay    time.Duration
-	output   contracts.CellOutput
-	err      error
+	kind      contracts.CellKind
+	delay     time.Duration
+	output    contracts.CellOutput
+	err       error
 	callCount atomic.Int32
 }
 
@@ -306,6 +306,71 @@ func TestFanOut_NoCommander_FallbackCOP(t *testing.T) {
 
 	if cop.Summary != "Automated COP — Commander unavailable." {
 		t.Errorf("unexpected fallback summary: %s", cop.Summary)
+	}
+}
+
+func TestFanOut_ContextCancellation(t *testing.T) {
+	// Cell that blocks until context is cancelled.
+	blocking := &mockCell{
+		kind:  contracts.CellInfrastructure,
+		delay: 5 * time.Second, // would block for 5s without ctx cancel
+	}
+
+	cells := map[contracts.CellKind]contracts.Cell{
+		contracts.CellInfrastructure: blocking,
+	}
+
+	engine := NewEngine(cells)
+	wake := []contracts.CellKind{contracts.CellInfrastructure}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := engine.FanOut(ctx, makeSnapshot(1), makeTrigger(), wake)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+
+	if err != context.DeadlineExceeded {
+		t.Errorf("expected DeadlineExceeded, got: %v", err)
+	}
+
+	// Should return promptly, not after 5s.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("FanOut took %v after ctx cancel — should have returned promptly", elapsed)
+	}
+}
+
+func TestFanOut_CommanderError_SurfacedInSummary(t *testing.T) {
+	infra := newMockCell(contracts.CellInfrastructure, "Working", contracts.RiskMedium)
+
+	commander := &mockCell{
+		kind: contracts.CellCommander,
+		err:  errors.New("Commander LLM quota exceeded"),
+	}
+
+	cells := map[contracts.CellKind]contracts.Cell{
+		contracts.CellInfrastructure: infra,
+		contracts.CellCommander:      commander,
+	}
+
+	engine := NewEngine(cells)
+	wake := []contracts.CellKind{contracts.CellInfrastructure, contracts.CellCommander}
+
+	cop, err := engine.FanOut(context.Background(), makeSnapshot(15), makeTrigger(), wake)
+	if err != nil {
+		t.Fatalf("FanOut should not return hard error on Commander failure: %v", err)
+	}
+
+	if !strings.Contains(cop.Summary, "Commander failed") {
+		t.Errorf("Commander failure should be surfaced in COP summary, got: %s", cop.Summary)
+	}
+
+	if !strings.Contains(cop.Summary, "quota exceeded") {
+		t.Errorf("Commander error message should appear in COP summary, got: %s", cop.Summary)
 	}
 }
 
