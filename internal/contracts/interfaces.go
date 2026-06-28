@@ -41,6 +41,15 @@ type Orchestrator interface {
 	FanOut(ctx context.Context, snapshot WorldState, trigger Event, wake []CellKind) (CommonOperationalPicture, error)
 }
 
+// Classifier decides which specialist Cells should be woken for parallel
+// analysis when an accepted event changes world state (§6). The returned
+// slice contains only specialist CellKinds — the orchestrator unconditionally
+// invokes the Commander as a phase-2 synthesis step after all specialists
+// return.
+type Classifier interface {
+	Classify(snapshot WorldState, trigger Event) []CellKind
+}
+
 // LLMClient is the Cerebras/Gemma client; all provider-specific types stay
 // behind it (SPEC §16.1).
 type LLMClient interface {
