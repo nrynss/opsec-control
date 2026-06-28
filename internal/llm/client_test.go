@@ -60,7 +60,7 @@ func TestMockMode(t *testing.T) {
 			}
 
 			const mockTokensPerSec = 1500.0
-			if math.Abs(resp.TokensPerSec - mockTokensPerSec) > 1e-9 {
+			if math.Abs(resp.TokensPerSec-mockTokensPerSec) > 1e-9 {
 				t.Errorf("expected mock tokensPerSec to be 1500, got %f", resp.TokensPerSec)
 			}
 
