@@ -1,0 +1,95 @@
+version: "3"
+
+# Cross-platform task runner (SPEC §19.1 — no make, which Windows lacks).
+# Keep commands OS-agnostic: prefer the Go/Node toolchains over shell
+# one-liners (no `rm -rf`, `&&`, `VAR=x cmd` — they break on Windows).
+
+vars:
+  PKG: ./...
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  tidy:
+    desc: Sync go.mod / go.sum
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: Format all Go code
+    cmds:
+      - gofmt -w .
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet {{.PKG}}
+
+  build:
+    desc: Build every Go package and command
+    cmds:
+      - go build {{.PKG}}
+
+  build:eoc:
+    desc: Build the EOC server binary
+    cmds:
+      - go build -o bin/eoc{{exeExt}} ./cmd/eoc
+
+  build:scenariogen:
+    desc: Build the offline scenario compiler
+    cmds:
+      - go build -o bin/scenariogen{{exeExt}} ./cmd/scenariogen
+
+  test:
+    desc: Run all unit tests
+    cmds:
+      - go test {{.PKG}}
+
+  contracttest:
+    desc: Run the shared contract test suite (SPEC §0.6) — required for "done"
+    cmds:
+      - go test ./internal/contracts/contracttest/...
+
+  cover:
+    desc: Run tests with a coverage profile
+    cmds:
+      - go test -coverprofile=coverage.out {{.PKG}}
+
+  run:
+    desc: Run the EOC server
+    cmds:
+      - go run ./cmd/eoc
+
+  check:
+    desc: Full local gate — build, vet, test (run before declaring done)
+    cmds:
+      - go build {{.PKG}}
+      - go vet {{.PKG}}
+      - go test {{.PKG}}
+
+  web:install:
+    desc: Install web/ dependencies
+    dir: web
+    cmds:
+      - npm ci
+
+  web:dev:
+    desc: Run the Astro dev server
+    dir: web
+    cmds:
+      - npm run dev
+
+  web:build:
+    desc: Build the web dashboard
+    dir: web
+    cmds:
+      - npm run build
+
+  docker:build:
+    desc: Build the Linux container image (the build authority — SPEC §19.3)
+    cmds:
+      - docker build -t opsec-control:dev .

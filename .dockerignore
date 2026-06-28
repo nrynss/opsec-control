@@ -1,0 +1,15 @@
+.git/
+.github/
+.gcourer/
+.task/
+**/node_modules/
+web/dist/
+web/.astro/
+web/.output/
+bin/
+dist/
+coverage.out
+coverage.html
+*.md
+.env
+.env.*

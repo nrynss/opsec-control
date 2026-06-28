@@ -1,0 +1,44 @@
+# Line-ending normalization — SPEC §19.1.
+# This is the #1 cross-platform risk: it keeps the repo LF on every OS so
+# Windows (CRLF) and macOS/Linux (LF) Builders never generate phantom diffs.
+# Set BEFORE the first commit.
+
+* text=auto eol=lf
+
+# Shell scripts must stay LF even when checked out on Windows.
+*.sh    text eol=lf
+
+# Source — explicit LF.
+*.go     text eol=lf
+*.mod    text eol=lf
+*.sum    text eol=lf
+*.json   text eol=lf
+*.js     text eol=lf
+*.mjs    text eol=lf
+*.cjs    text eol=lf
+*.ts     text eol=lf
+*.svelte text eol=lf
+*.astro  text eol=lf
+*.css    text eol=lf
+*.html   text eol=lf
+*.md     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.toml   text eol=lf
+
+# Windows-only scripts stay CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Binary assets — never normalize or diff.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.svg   text eol=lf
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.pdf   binary

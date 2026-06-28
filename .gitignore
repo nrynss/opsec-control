@@ -1,0 +1,49 @@
+# ---- Go ----
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+# Local workspace files (each Builder's own; never shared).
+go.work
+go.work.sum
+
+# ---- Node / Astro / Svelte (web/) ----
+node_modules/
+web/dist/
+web/.astro/
+web/.output/
+web/.vercel/
+web/.netlify/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Env / secrets (Cerebras API key, etc.) ----
+.env
+.env.*
+!.env.example
+
+# ---- Task runner ----
+.task/
+
+# ---- Local tooling ----
+.gcourer/
+
+# ---- Editors / OS ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*~
+.DS_Store
+Thumbs.db
