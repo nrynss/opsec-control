@@ -46,7 +46,7 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/sensors` | stub | ingest adapters |
 | `internal/api` + `websocket` | **claimed by Grok Builder**; implementation starting | HTTP/WS edge |
 | `cmd/eoc` (server wiring) | **stub** | integration root: wires all pkgs + runs the anomaly→fan-out loop, serves api/ws |
-| `web/` | README only | Astro+Svelte dashboard |
+| `web/` | **implemented by Antigravity Builder** | Astro+Svelte dashboard |
 
 **MVD build order (SPEC §13):** scenario+sim → events → state → anomaly →
 orchestrator fan-out of 2–3 Cells → Commander → dashboard.
