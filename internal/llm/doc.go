@@ -2,7 +2,7 @@
 // interface, plus the throughput/latency metrics surfaced on the HUD (SPEC §16.1,
 // §15.1).
 //
-// Owner: llm Builder.
+// Owner: Antigravity Builder (llm lane claimed in HANDOFF.md).
 // Depends on: contracts/interfaces (LLMClient).
 // Must NOT: own domain/operational logic; leak provider-specific types past the
 // interface boundary.
