@@ -36,6 +36,20 @@ jobs:
       - name: test (incl. contract suite, §0.6)
         run: go test ./...
 
+  race:
+    name: Go race detector (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # The race detector needs cgo (a C toolchain), which ubuntu-latest has but
+      # Windows builders don't — so this is the authority for concurrency bugs
+      # across every lane (event bus, orchestrator fan-out, websocket writers).
+      - name: test -race
+        run: go test -race ./...
+
   docker:
     name: Docker build (build authority, §19.3)
     runs-on: ubuntu-latest
