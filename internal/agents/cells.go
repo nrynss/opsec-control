@@ -18,11 +18,7 @@ func (b *cellBase) Kind() contracts.CellKind {
 	return b.kind
 }
 
-// executeLLM handles the plan -> self-critique -> refine loop (SPEC §9)
-// and enforces the schema for structured output.
 func (b *cellBase) executeLLM(ctx context.Context, systemPrompt, userPrompt string) (contracts.CellOutput, error) {
-	// Schema for CellOutput to force the LLM into valid JSON.
-	// In a real implementation, this would be a pre-defined JSON schema object.
 	schema := json.RawMessage(`{
 		"type": "object",
 		"properties": {
@@ -36,56 +32,26 @@ func (b *cellBase) executeLLM(ctx context.Context, systemPrompt, userPrompt stri
 		"required": ["summary", "riskLevel", "confidence", "stateVersion", "recommendations", "evidence"]
 	}`)
 
-	// Loop for: Plan -> Critique -> Refine (Limited to 2 turns for latency)
-	var lastResponse string
-	var currentOutput contracts.CellOutput
-	var err error
-
-	for turn := 0; turn < 2; turn++ {
-		userMsg := userPrompt
-		if turn > 0 {
-			userMsg = fmt.Sprintf("Critique and refine the previous analysis for better accuracy and specific recommendations:\n\n%s", lastResponse)
-		}
-
-		resp, err := b.llm.Complete(ctx, contracts.LLMRequest{
-			System: systemPrompt,
-			User:   userMsg,
-			Schema: schema,
-		})
-		if err != nil {
-			return contracts.CellOutput{}, fmt.Errorf("llm completion failed: %w", err)
-		}
-
-		lastResponse = resp.Content
-		err = json.Unmarshal([]byte(resp.Content), &currentOutput)
-		if err != nil {
-			// If the LLM fails the schema on turn 0, we try one more time with the refine loop.
-			// If it fails on turn 1, we return an error.
-			if turn == 1 {
-				return contracts.CellOutput{}, fmt.Errorf("llm output failed schema validation: %w", err)
-			}
-			continue
-		}
-
-		// Post-unmarshal: verify required fields are actually present/non-zero
-		// if the LLM returned a valid JSON object but missed crucial fields.
-		if currentOutput.Summary == "" || currentOutput.RiskLevel == "" {
-			if turn == 1 {
-				return contracts.CellOutput{}, fmt.Errorf("llm output missing required content")
-			}
-			continue
-		}
-
-		// If unmarshaled successfully, we have a valid output.
-		// For the MVD, we can return the first valid one or continue to refine.
-		// Let's refine once if we have time.
-		if turn == 0 {
-			continue
-		}
-		break
+	resp, err := b.llm.Complete(ctx, contracts.LLMRequest{
+		System: systemPrompt,
+		User:   userPrompt,
+		Schema: schema,
+	})
+	if err != nil {
+		return contracts.CellOutput{}, fmt.Errorf("llm completion failed: %w", err)
 	}
 
-	return currentOutput, err
+	var out contracts.CellOutput
+	err = json.Unmarshal([]byte(resp.Content), &out)
+	if err != nil {
+		return contracts.CellOutput{}, fmt.Errorf("llm output failed schema validation: %w", err)
+	}
+
+	if out.Summary == "" || out.RiskLevel == "" {
+		return contracts.CellOutput{}, fmt.Errorf("llm output missing required content")
+	}
+
+	return out, nil
 }
 
 // --- Infrastructure Cell ---
@@ -102,7 +68,8 @@ func NewInfrastructure(llm contracts.LLMClient) contracts.Cell {
 
 func (c *infrastructureCell) Analyze(ctx context.Context, in contracts.CellInput) (contracts.CellOutput, error) {
 	system := "You are the Infrastructure Cell. Analyze roads, bridges, utilities, and logistics. Identify bottlenecks and structural risks."
-	user := fmt.Sprintf("World State: %+v\nTrigger Event: %+v", in.Snapshot, in.Trigger)
+	user := fmt.Sprintf("Bridges: %+v\nSectors (Power/Gas/Water): %+v\nDam: %+v\nLevee: %+v\nTrigger Event: %+v",
+		in.Snapshot.Bridges, in.Snapshot.Sectors, in.Snapshot.Dam, in.Snapshot.Levee, in.Trigger)
 
 	out, err := c.executeLLM(ctx, system, user)
 	if err != nil {
@@ -128,7 +95,8 @@ func NewMedical(llm contracts.LLMClient) contracts.Cell {
 
 func (c *medicalCell) Analyze(ctx context.Context, in contracts.CellInput) (contracts.CellOutput, error) {
 	system := "You are the Medical Cell. Analyze hospital capacity, casualties, and medical logistics. Prioritize life-saving interventions."
-	user := fmt.Sprintf("World State: %+v\nTrigger Event: %+v", in.Snapshot, in.Trigger)
+	user := fmt.Sprintf("Hospitals: %+v\nResources (Ambulances/Helicopters): %+v\nTrigger Event: %+v",
+		in.Snapshot.Hospitals, in.Snapshot.Resources, in.Trigger)
 
 	out, err := c.executeLLM(ctx, system, user)
 	if err != nil {
@@ -154,7 +122,8 @@ func NewPopulation(llm contracts.LLMClient) contracts.Cell {
 
 func (c *populationCell) Analyze(ctx context.Context, in contracts.CellInput) (contracts.CellOutput, error) {
 	system := "You are the Population Cell. Analyze shelters, evacuations, and population movement. Focus on citizen safety and transit."
-	user := fmt.Sprintf("World State: %+v\nTrigger Event: %+v", in.Snapshot, in.Trigger)
+	user := fmt.Sprintf("Shelters: %+v\nFlood Extent: %+v\nSectors (Population): %+v\nTrigger Event: %+v",
+		in.Snapshot.Shelters, in.Snapshot.Flood, in.Snapshot.Sectors, in.Trigger)
 
 	out, err := c.executeLLM(ctx, system, user)
 	if err != nil {
@@ -180,7 +149,12 @@ func NewCommander(llm contracts.LLMClient) contracts.Cell {
 
 func (c *commanderCell) Analyze(ctx context.Context, in contracts.CellInput) (contracts.CellOutput, error) {
 	system := "You are the Commander Cell. Synthesize world state and specialist reports into a Common Operational Picture (COP). Prioritize resources and define objectives."
-	user := fmt.Sprintf("World State: %+v\nTrigger Event: %+v\nSpecialist Reports: %+v", in.Snapshot, in.Trigger, in.Peers)
+	user := fmt.Sprintf("Critical State (Dam/Levee/Flood): %+v\nSpecialist Reports: %+v\nTrigger Event: %+v",
+		struct {
+			Dam   contracts.Dam
+			Levee contracts.Levee
+			Flood contracts.Flood
+		}{in.Snapshot.Dam, in.Snapshot.Levee, in.Snapshot.Flood}, in.Peers, in.Trigger)
 
 	out, err := c.executeLLM(ctx, system, user)
 	if err != nil {
