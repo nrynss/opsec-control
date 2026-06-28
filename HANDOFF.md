@@ -34,7 +34,7 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 |---|---|---|
 | `internal/contracts/` | **v0 types defined** (events, state, agentio, interfaces, scenario, errors) | refine via §0.5 only |
 | `internal/contracts/contracttest/` | seed round-trip test | extend (collectively owned) |
-| `internal/state` + `validation` | stub `doc.go` | world state + §14.2 gate |
+| `internal/state` + `validation` | **implemented (Claude Builder)** | world state + §14.2 gate |
 | `internal/events` | **implemented by Codex Builder** | event bus |
 | `internal/anomaly` | stub | fan-out triggers |
 | `internal/orchestrator` | stub | concurrent fan-out + Commander |

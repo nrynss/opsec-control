@@ -19,10 +19,12 @@ import (
 
 // Client implements contracts.LLMClient using the Cerebras API.
 type Client struct {
-	apiKey  string
-	baseURL string
-	model   string
-	client  *http.Client
+	apiKey     string
+	baseURL    string
+	model      string
+	client     *http.Client
+	maxRetries int
+	backoff    time.Duration
 }
 
 // Config holds configuration parameters for the Cerebras client.
@@ -31,6 +33,8 @@ type Config struct {
 	BaseURL    string
 	Model      string
 	HTTPClient *http.Client
+	MaxRetries int
+	Backoff    time.Duration
 }
 
 // NewClient creates a new Cerebras LLM client.
@@ -67,11 +71,23 @@ func NewClient(cfg Config) *Client {
 		}
 	}
 
+	maxRetries := cfg.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
+	backoff := cfg.Backoff
+	if backoff <= 0 {
+		backoff = 500 * time.Millisecond
+	}
+
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		model:   model,
-		client:  httpClient,
+		apiKey:     apiKey,
+		baseURL:    baseURL,
+		model:      model,
+		client:     httpClient,
+		maxRetries: maxRetries,
+		backoff:    backoff,
 	}
 }
 
@@ -87,6 +103,9 @@ func (c *Client) Complete(ctx context.Context, req contracts.LLMRequest) (contra
 
 // ensureAdditionalPropertiesFalse recursively adds "additionalProperties": false to all object definitions
 // in a JSON schema. Cerebras requires this parameter to be strictly set for all objects in response_format.
+//
+// Note: Unmarshaling the raw bytes into a fresh 'any' structure creates a completely separate in-memory
+// copy of the JSON schema, so mutating 'data' does not side-effect the caller's raw slice or any other shared memory.
 func ensureAdditionalPropertiesFalse(raw []byte) []byte {
 	var data any
 	if err := json.Unmarshal(raw, &data); err != nil {
@@ -190,29 +209,71 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 	}
 
 	url := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(c.baseURL, "/"))
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBytes))
-	if err != nil {
-		return contracts.LLMResponse{}, fmt.Errorf("create HTTP request: %w", err)
-	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	var httpResp *http.Response
+	var bodyBytes []byte
+	var duration time.Duration
+	currentBackoff := c.backoff
 
-	startTime := time.Now()
-	httpResp, err := c.client.Do(httpReq)
-	duration := time.Since(startTime)
-	if err != nil {
-		return contracts.LLMResponse{}, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer httpResp.Body.Close()
+	for attempt := 0; attempt < c.maxRetries; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBytes))
+		if err != nil {
+			return contracts.LLMResponse{}, fmt.Errorf("create HTTP request: %w", err)
+		}
 
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return contracts.LLMResponse{}, fmt.Errorf("read response body: %w", err)
-	}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
 
-	if httpResp.StatusCode != http.StatusOK {
-		return contracts.LLMResponse{}, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(bodyBytes))
+		startTime := time.Now()
+		httpResp, err = c.client.Do(httpReq)
+		duration = time.Since(startTime)
+
+		if err != nil {
+			if attempt == c.maxRetries-1 {
+				return contracts.LLMResponse{}, fmt.Errorf("HTTP request failed (after %d attempts): %w", c.maxRetries, err)
+			}
+			select {
+			case <-ctx.Done():
+				return contracts.LLMResponse{}, ctx.Err()
+			case <-time.After(currentBackoff):
+			}
+			currentBackoff *= 2
+			continue
+		}
+
+		bodyBytes, err = io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		if err != nil {
+			if attempt == c.maxRetries-1 {
+				return contracts.LLMResponse{}, fmt.Errorf("read response body: %w", err)
+			}
+			select {
+			case <-ctx.Done():
+				return contracts.LLMResponse{}, ctx.Err()
+			case <-time.After(currentBackoff):
+			}
+			currentBackoff *= 2
+			continue
+		}
+
+		// Retry on transient status codes (429 Too Many Requests, or 5xx Server Errors)
+		if httpResp.StatusCode == http.StatusTooManyRequests || httpResp.StatusCode >= 500 {
+			if attempt == c.maxRetries-1 {
+				return contracts.LLMResponse{}, fmt.Errorf("API error (status %d) after %d attempts: %s", httpResp.StatusCode, c.maxRetries, string(bodyBytes))
+			}
+			select {
+			case <-ctx.Done():
+				return contracts.LLMResponse{}, ctx.Err()
+			case <-time.After(currentBackoff):
+			}
+			currentBackoff *= 2
+			continue
+		}
+
+		if httpResp.StatusCode != http.StatusOK {
+			return contracts.LLMResponse{}, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(bodyBytes))
+		}
+		break
 	}
 
 	var apiResp chatCompletionResponse
