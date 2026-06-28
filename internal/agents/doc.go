@@ -5,7 +5,7 @@
 // Each Cell is independently ownable by a different Builder because they share
 // no state — only the schema in contracts/agentio.go.
 //
-// Owner: per-Cell Builders.
+// Owner: Gemma 4 31B on Cerebras (Builder)
 // Depends on: contracts/{agentio,interfaces}, contracts/state (read-only).
 // Must NOT: mutate state; call the EventBus; talk to other Cells; read
 // wall-clock or rand. The Commander consumes other Cells' outputs as data the
