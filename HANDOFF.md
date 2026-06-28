@@ -41,10 +41,10 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/agents` | **implemented (Gemma 4 31B on Cerebras Builder)** | the six Cells |
 | `internal/llm` | **implemented by Antigravity Builder** | Cerebras client |
 | `internal/simulation` + `scenario` | **implemented by Grok Builder** | sim clock + replay |
-| `internal/scenariogen` (+`cmd`) | stub | offline compiler |
+| `internal/scenariogen` (+`cmd`) | **claimed by Gemma/Pi Builder** — offline authoring tool | Gemma → validated, frozen `scenario.json` |
 | `internal/timeline` | **implemented** (Poolside Laguna M) | event log |
 | `internal/sensors` | stub | ingest adapters |
-| `internal/api` + `websocket` | stub | HTTP/WS edge |
+| `internal/api` + `websocket` | **claimed by Grok Builder**; implementation starting | HTTP/WS edge |
 | `cmd/eoc` (server wiring) | **stub** | integration root: wires all pkgs + runs the anomaly→fan-out loop, serves api/ws |
 | `web/` | README only | Astro+Svelte dashboard |
 
@@ -82,8 +82,17 @@ headless loop can start in parallel too** — only cmd/eoc's *serving* wiring mu
 wait for `api`. Mind the measured Cerebras ceiling (4 concurrent, 100 RPM/TPM —
 see §6) when the loop fans out live.
 
-**Deferrable for the MVD:** `internal/sensors` and `internal/scenariogen`
-(+`cmd/scenariogen`) — use a hand-written, validated scenario JSON instead.
+**`internal/scenariogen` (+`cmd/scenariogen`)** — being built as an **offline
+authoring tool**: Gemma drafts the curated 3-act anomaly beats → validated by
+replay through `state.New(Initial)` + `Apply` → frozen to a deterministic,
+reviewable `scenario.json`. It **never** runs on the live path (§14.1); its only
+product is the frozen file the simulation replays.
+
+**Deferrable for the MVD:** `internal/sensors` (the simulation is the event
+source). Volume/liveness — the "thousands of data points" — comes from a
+**templated, non-LLM** ambient-noise generator (§14.3) layered in later, **not**
+from scenariogen or the live LLM path. Keep the signal (curated, LLM-authored,
+frozen) separate from the volume (templated, cheap, deterministic).
 
 ## 4. Changing a contract — the ONLY cross-lane action (SPEC §0.5)
 
