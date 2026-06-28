@@ -45,10 +45,45 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/timeline` | **implemented** (Poolside Laguna M) | event log |
 | `internal/sensors` | stub | ingest adapters |
 | `internal/api` + `websocket` | stub | HTTP/WS edge |
+| `cmd/eoc` (server wiring) | **stub** | integration root: wires all pkgs + runs the anomaly→fan-out loop, serves api/ws |
 | `web/` | README only | Astro+Svelte dashboard |
 
 **MVD build order (SPEC §13):** scenario+sim → events → state → anomaly →
 orchestrator fan-out of 2–3 Cells → Commander → dashboard.
+
+### 3.1 Remaining work & parallelism (post-spine)
+
+The reasoning spine (sim → events → state → anomaly → orchestrator → Cells →
+Commander) is **complete and green**. What's left, and what can run concurrently:
+
+- **`internal/api` + `websocket`** — **independent, startable now.** Its deps
+  (`StateStore`/`EventBus`/`Orchestrator` interfaces) are all done. Codes to
+  `contracts/*`; imports neither `cmd/eoc` nor `web`.
+- **`web/`** — **build-independent** (separate Astro/Svelte toolchain); can be
+  scaffolded now against `contracts/schemas`. Needs a running `api` only for
+  live data, not to start.
+- **`cmd/eoc`** — the integration root; imports everything. Splits in two:
+  - **headless reasoning loop** (sim → bus → `state.Apply` → `anomaly.Classify`
+    → `orchestrator.FanOut` → log the COP) depends only on already-done
+    packages → buildable + smoke-testable **now**, no api/web needed. Fastest
+    proof the spine works end-to-end.
+  - **HTTP serving** wiring depends on `api`+`websocket` landing first.
+
+Dependency shape:
+
+```
+api+websocket ┐
+              ├─> cmd/eoc  (wires all packages; serves the HTTP/WS edge)
+web/ ─────────┘   (web → api at runtime, for live data)
+```
+
+So **`api`+`websocket` and `web/` can proceed in parallel**, and **`cmd/eoc`'s
+headless loop can start in parallel too** — only cmd/eoc's *serving* wiring must
+wait for `api`. Mind the measured Cerebras ceiling (4 concurrent, 100 RPM/TPM —
+see §6) when the loop fans out live.
+
+**Deferrable for the MVD:** `internal/sensors` and `internal/scenariogen`
+(+`cmd/scenariogen`) — use a hand-written, validated scenario JSON instead.
 
 ## 4. Changing a contract — the ONLY cross-lane action (SPEC §0.5)
 
