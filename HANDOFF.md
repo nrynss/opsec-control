@@ -41,7 +41,7 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/agents` | **implemented (Gemma 4 31B on Cerebras Builder)** | the six Cells |
 | `internal/llm` | **implemented by Antigravity Builder** | Cerebras client |
 | `internal/simulation` + `scenario` | **implemented by Grok Builder** | sim clock + replay |
-| `internal/scenariogen` (+`cmd`) | **claimed by Gemma 4 31B on Cerebras Builder** — offline authoring tool | Gemma → validated, frozen `scenario.json` |
+| `internal/scenariogen` (+`cmd`) | **implemented** — drafted by Gemma 4 31B on Cerebras Builder, **rescued/completed by Claude Builder** (Gemma 429'd; substrate-corruption bug + llm-ctor + test fixed) | offline authoring tool → validated, frozen `scenario.json` |
 | `internal/timeline` | **implemented** (Poolside Laguna M) | event log |
 | `internal/sensors` | stub | ingest adapters |
 | `internal/api` + `websocket` | **claimed by Grok Builder**; implementation starting | HTTP/WS edge |
