@@ -49,7 +49,7 @@ func TestMockMode(t *testing.T) {
 				System: "You are the Commander cell",
 				User:   "Synthesize the COP for version: 3",
 			},
-			expectType: `"prioritizedActions"`,
+			expectType: `"agent": "Commander"`,
 		},
 	}
 

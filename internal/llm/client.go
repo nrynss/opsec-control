@@ -413,35 +413,21 @@ func (c *Client) completeMock(req contracts.LLMRequest) (contracts.LLMResponse, 
 	switch {
 	case strings.Contains(cell, "commander"):
 		content = fmt.Sprintf(`{
+			"agent": "Commander",
 			"summary": "Cerebro earthquake cascade. Two bridges closed, Highgate heavily damaged, Central General hospital at critical capacity.",
+			"riskLevel": "Critical",
+			"confidence": 0.95,
 			"stateVersion": %d,
-			"overallRisk": "Critical",
-			"prioritizedActions": [
-				{"priority": 1, "action": "Airlift critical casualties from Westbank Clinic", "owner": "Medical"},
-				{"priority": 2, "action": "Deploy USAR search teams to Highgate", "owner": "Population"},
-				{"priority": 3, "action": "Inspect Vora and Iron bridges for structural integrity", "owner": "Infrastructure"}
+			"recommendations": [
+				"Airlift critical casualties from Westbank Clinic",
+				"Deploy USAR search teams to Highgate",
+				"Inspect Vora and Iron bridges for structural integrity"
 			],
-			"cellOutputs": [
-				{
-					"agent": "Infrastructure",
-					"summary": "Vora Bridge and Iron Bridge closed due to structural damage.",
-					"riskLevel": "High",
-					"confidence": 0.95,
-					"stateVersion": %d,
-					"recommendations": ["Assess Vora Bridge", "Establish detours via South Span"],
-					"evidence": ["Bridge structural sensors showing deflection"]
-				},
-				{
-					"agent": "Medical",
-					"summary": "Casualty surge at Central General. Westbank Clinic cut off.",
-					"riskLevel": "Critical",
-					"confidence": 0.90,
-					"stateVersion": %d,
-					"recommendations": ["Airlift patients from Westbank Clinic"],
-					"evidence": ["Hospital ER occupancy above 90%%"]
-				}
+			"evidence": [
+				"Multiple utility dropouts and bridge closures",
+				"Hospital ER occupancy reports straining"
 			]
-		}`, stateVersion, stateVersion, stateVersion)
+		}`, stateVersion)
 
 	case strings.Contains(cell, "infrastructure"):
 		content = fmt.Sprintf(`{
