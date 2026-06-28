@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,7 +59,8 @@ func TestMockMode(t *testing.T) {
 				t.Fatalf("Complete failed: %v", err)
 			}
 
-			if resp.TokensPerSec != 1500.0 {
+			const mockTokensPerSec = 1500.0
+			if math.Abs(resp.TokensPerSec - mockTokensPerSec) > 1e-9 {
 				t.Errorf("expected mock tokensPerSec to be 1500, got %f", resp.TokensPerSec)
 			}
 
