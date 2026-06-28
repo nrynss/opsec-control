@@ -37,6 +37,7 @@ pnpm-debug.log*
 
 # ---- Local tooling ----
 .gcourer/
+mcps/
 
 # ---- Editors / OS ----
 .idea/
