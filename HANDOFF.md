@@ -45,7 +45,7 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/timeline` | **implemented** (Poolside Laguna M) | event log |
 | `internal/sensors` | stub | ingest adapters |
 | `internal/api` + `websocket` | **implemented by Grok Builder** | HTTP/WS edge |
-| `cmd/eoc` (server wiring) | **stub** | integration root: wires all pkgs + runs the anomaly→fan-out loop, serves api/ws |
+| `cmd/eoc` (server wiring) | **implemented (Claude Builder)** — end-to-end flow tested live | integration root: wires all pkgs + runs the anomaly→fan-out loop, serves api/ws |
 | `web/` | **implemented by Antigravity Builder** | Astro+Svelte dashboard |
 
 **MVD build order (SPEC §13):** scenario+sim → events → state → anomaly →

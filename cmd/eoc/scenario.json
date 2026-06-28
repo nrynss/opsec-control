@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Cerebro Earthquake Cascade (demo)",
+  "seed": 1729,
+  "initial": {
+    "version": 0,
+    "time": 0,
+    "sectors": {
+      "S-HIGHGATE": {"id": "S-HIGHGATE", "name": "Highgate", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 150000},
+      "S-CENTRAL": {"id": "S-CENTRAL", "name": "Central", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 300000},
+      "S-IRONWORKS": {"id": "S-IRONWORKS", "name": "Ironworks", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 100000},
+      "S-HARBORSIDE": {"id": "S-HARBORSIDE", "name": "Harborside", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 120000},
+      "S-WESTBANK": {"id": "S-WESTBANK", "name": "Westbank", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 200000},
+      "S-SOUTHPORT": {"id": "S-SOUTHPORT", "name": "Southport", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 180000},
+      "S-GREENFIELD": {"id": "S-GREENFIELD", "name": "Greenfield", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 100000},
+      "S-MAINOR": {"id": "S-MAINOR", "name": "Mainor Heights", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 50000}
+    },
+    "bridges": {
+      "B-VORA": {"id": "B-VORA", "name": "Vora Bridge", "status": "open"},
+      "B-IRON": {"id": "B-IRON", "name": "Iron Bridge", "status": "open"},
+      "B-SOUTH": {"id": "B-SOUTH", "name": "South Span", "status": "open"}
+    },
+    "dam": {"id": "D-MAINOR", "status": "normal", "reservoirPct": 0.75, "stressRating": 0.1},
+    "levee": {"id": "L-SOUTHPORT", "status": "intact", "height": 5.0, "integrity": 0.9},
+    "hospitals": {
+      "H-CENTRAL": {"id": "H-CENTRAL", "name": "Central General", "sector": "S-CENTRAL", "beds": 500, "icu": 50, "er": 100, "occupancy": 300, "band": "normal", "onGenerator": false},
+      "H-WESTBANK": {"id": "H-WESTBANK", "name": "Westbank Clinic", "sector": "S-WESTBANK", "beds": 100, "icu": 10, "er": 20, "occupancy": 60, "band": "normal", "onGenerator": false}
+    },
+    "shelters": {
+      "SH-GREENFIELD-1": {"id": "SH-GREENFIELD-1", "name": "Greenfield Uni Shelter", "sector": "S-GREENFIELD", "capacity": 2000, "occupancy": 0, "full": false},
+      "SH-GREENFIELD-2": {"id": "SH-GREENFIELD-2", "name": "Greenfield Civic Center", "sector": "S-GREENFIELD", "capacity": 1500, "occupancy": 0, "full": false}
+    },
+    "fireZones": {},
+    "flood": {"polygons": []},
+    "resources": {
+      "R-AMB-1": {"id": "R-AMB-1", "kind": "ambulance", "homeBase": "S-CENTRAL", "count": 50, "deployed": 0},
+      "R-FIRE-1": {"id": "R-FIRE-1", "kind": "fire_engine", "homeBase": "S-HARBORSIDE", "count": 30, "deployed": 0},
+      "R-USAR-1": {"id": "R-USAR-1", "kind": "usar_team", "homeBase": "S-HARBORSIDE", "count": 10, "deployed": 0},
+      "R-HELI-1": {"id": "R-HELI-1", "kind": "helicopter", "homeBase": "S-CENTRAL", "count": 5, "deployed": 0}
+    }
+  },
+  "events": [
+    {"id": "evt-1", "timestamp": 0, "source": "Gemma4-Perception", "type": "MainshockOccurred", "confidence": 1.0, "payload": {"magnitude": 6.8}},
+    {"id": "evt-2", "timestamp": 10, "source": "Gemma4-Perception", "type": "BuildingCollapsed", "confidence": 0.9, "payload": {"sector": "S-HIGHGATE"}},
+    {"id": "evt-3", "timestamp": 20, "source": "Gemma4-Perception", "type": "BridgeClosed", "confidence": 0.95, "payload": {"bridgeId": "B-VORA"}},
+    {"id": "evt-4", "timestamp": 30, "source": "Gemma4-Perception", "type": "BridgeClosed", "confidence": 0.93, "payload": {"bridgeId": "B-IRON"}},
+    {"id": "evt-5", "timestamp": 40, "source": "sensor-grid", "type": "PowerFailure", "confidence": 0.9, "payload": {"sector": "S-HIGHGATE"}},
+    {"id": "evt-6", "timestamp": 50, "source": "hospital-feed", "type": "HospitalCapacityChanged", "confidence": 0.88, "payload": {"hospitalId": "H-CENTRAL", "occupancy": 470}},
+    {"id": "evt-7", "timestamp": 70, "source": "Gemma4-Perception", "type": "AftershockOccurred", "confidence": 0.85, "payload": {"magnitude": 5.9}},
+    {"id": "evt-8", "timestamp": 80, "source": "Gemma4-Perception", "type": "BridgeClosed", "confidence": 0.9, "payload": {"bridgeId": "B-SOUTH"}},
+    {"id": "evt-9", "timestamp": 90, "source": "sensor-grid", "type": "FireIgnited", "confidence": 0.85, "payload": {"fireZoneId": "FZ-IRON", "sector": "S-IRONWORKS"}},
+    {"id": "evt-10", "timestamp": 100, "source": "sensor-grid", "type": "GasLeakDetected", "confidence": 0.8, "payload": {"sector": "S-IRONWORKS"}},
+    {"id": "evt-11", "timestamp": 110, "source": "dam-telemetry", "type": "DamStressElevated", "confidence": 0.82, "payload": {}},
+    {"id": "evt-12", "timestamp": 130, "source": "drone-7", "type": "FireSpread", "confidence": 0.8, "payload": {"fireZoneId": "FZ-IRON"}},
+    {"id": "evt-13", "timestamp": 140, "source": "levee-telemetry", "type": "LeveeBreached", "confidence": 0.92, "payload": {}},
+    {"id": "evt-14", "timestamp": 150, "source": "drone-7", "type": "FloodExtentUpdated", "confidence": 0.9, "payload": {"polygons": [{"sector": "S-SOUTHPORT", "depthM": 1.5, "points": []}]}},
+    {"id": "evt-15", "timestamp": 160, "source": "shelter-feed", "type": "ShelterOccupancyChanged", "confidence": 0.87, "payload": {"shelterId": "SH-GREENFIELD-1", "occupancy": 2000}},
+    {"id": "evt-16", "timestamp": 170, "source": "eoc-ops", "type": "EvacuationOrdered", "confidence": 0.9, "payload": {"sector": "S-SOUTHPORT"}}
+  ]
+}
