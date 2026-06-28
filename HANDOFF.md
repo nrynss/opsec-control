@@ -36,13 +36,13 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/contracts/contracttest/` | seed round-trip test | extend (collectively owned) |
 | `internal/state` + `validation` | **implemented (Claude Builder)** | world state + §14.2 gate |
 | `internal/events` | **implemented by Codex Builder** | event bus |
-| `internal/anomaly` | **claimed by Grok Builder**; implementation starting | fan-out triggers |
+| `internal/anomaly` | **implemented by Grok Builder** (Classifier via §0.5 w/ orchestrator) | fan-out triggers |
 | `internal/orchestrator` | **implemented by Antigravity Builder** | concurrent fan-out + Commander |
 | `internal/agents` | stub | the six Cells |
 | `internal/llm` | **implemented by Antigravity Builder** | Cerebras client |
 | `internal/simulation` + `scenario` | **implemented by Grok Builder** | sim clock + replay |
 | `internal/scenariogen` (+`cmd`) | stub | offline compiler |
-| `internal/timeline` | stub | event log |
+| `internal/timeline` | **implemented** (Poolside Laguna M) | event log |
 | `internal/sensors` | stub | ingest adapters |
 | `internal/api` + `websocket` | stub | HTTP/WS edge |
 | `web/` | README only | Astro+Svelte dashboard |
