@@ -8,6 +8,13 @@ import (
 	"github.com/nrynss/opsec-control/internal/timeline"
 )
 
+// COPProvider allows the API to serve the current CommonOperationalPicture
+// without owning state. Typically provided by cmd/eoc which retains the last
+// result from orchestrator.FanOut.
+type COPProvider interface {
+	Current() contracts.CommonOperationalPicture
+}
+
 // EventLog is a small read interface satisfied by *timeline.Timeline.
 // api depends on this interface (not the concrete impl) per §0.2 r3.
 type EventLog interface {
@@ -35,15 +42,17 @@ type Server struct {
 	bus   contracts.EventBus
 	orch  contracts.Orchestrator
 	log   EventLog
+	cop   COPProvider
 }
 
 // New creates the API server.
-func New(store contracts.StateStore, bus contracts.EventBus, orch contracts.Orchestrator, log EventLog) *Server {
+func New(store contracts.StateStore, bus contracts.EventBus, orch contracts.Orchestrator, log EventLog, cop COPProvider) *Server {
 	return &Server{
 		store: store,
 		bus:   bus,
 		orch:  orch,
 		log:   log,
+		cop:   cop,
 	}
 }
 
@@ -65,11 +74,14 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ws)
 }
 
-// handleAgents returns a placeholder for agent/COP data.
-// In full, this would return last COP or cell outputs.
+// handleAgents returns the current CommonOperationalPicture if available.
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	// Placeholder: in real would use last fanout or orch, but for MVD simple.
 	w.Header().Set("Content-Type", "application/json")
+	if s.cop != nil {
+		json.NewEncoder(w).Encode(s.cop.Current())
+		return
+	}
+	// Fallback for when no COP provider is wired yet (MVD)
 	json.NewEncoder(w).Encode(map[string]string{"status": "agents endpoint - see orchestrator for COP"})
 }
 

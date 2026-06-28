@@ -41,7 +41,7 @@ func TestRegisterAndState(t *testing.T) {
 	orch := &mockOrch{}
 	log := &mockLog{}
 
-	srv := New(store, bus, orch, log)
+	srv := New(store, bus, orch, log, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 

@@ -44,7 +44,7 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 | `internal/scenariogen` (+`cmd`) | **implemented** — drafted by Gemma 4 31B on Cerebras Builder, **rescued/completed by Claude Builder** (Gemma 429'd; substrate-corruption bug + llm-ctor + test fixed) | offline authoring tool → validated, frozen `scenario.json` |
 | `internal/timeline` | **implemented** (Poolside Laguna M) | event log |
 | `internal/sensors` | stub | ingest adapters |
-| `internal/api` + `websocket` | **in progress by Grok Builder** | HTTP/WS edge |
+| `internal/api` + `websocket` | **implemented by Grok Builder** | HTTP/WS edge |
 | `cmd/eoc` (server wiring) | **stub** | integration root: wires all pkgs + runs the anomaly→fan-out loop, serves api/ws |
 | `web/` | **implemented by Antigravity Builder** | Astro+Svelte dashboard |
 
@@ -56,7 +56,7 @@ orchestrator fan-out of 2–3 Cells → Commander → dashboard.
 The reasoning spine (sim → events → state → anomaly → orchestrator → Cells →
 Commander) is **complete and green**. What's left, and what can run concurrently:
 
-- **`internal/api` + `websocket`** — **in progress by Grok Builder** (independent, startable now). Its deps
+- **`internal/api` + `websocket`** — **implemented by Grok Builder** (independent). Its deps
   (`StateStore`/`EventBus`/`Orchestrator` interfaces) are all done. Codes to
   `contracts/*`; imports neither `cmd/eoc` nor `web`.
 - **`web/`** — **build-independent** (separate Astro/Svelte toolchain); can be
