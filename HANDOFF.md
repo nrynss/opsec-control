@@ -203,7 +203,7 @@ To claim: change the cell to 🔵 with your builder name + date in the same comm
 | **P22** | ✅ **Done** — Gemma 4 31B (2026-06-29) | `internal/state` | Expose thread-safe Reset(initial WorldState) (clears seen map). | P19 ✅ |
 | **P23** | ✅ **Done** — Gemma 4 31B (2026-06-29) | `internal/timeline` | Expose thread-safe Truncate(). | P19 ✅ |
 | **P24** | ✅ **Done** — Grok Builder (2026-06-29) | `internal/api` + `cmd/eoc` | EOC coordinator (eocSimController with epoch guard) and WS broadcast of "reset" kind + actual API endpoint wiring and stats. | P23 |
-| **P25** | ⬜ **Unclaimed** | `web/` | Svelte visual updates: All Clear button, timeline clock with limits, stats dashboard widget. | P24 |
+| **P25** | ✅ **Done** — Antigravity (2026-06-29) | `web/` | Svelte visual updates: All Clear button, timeline clock with limits, stats dashboard widget. | P24 |
 | **P26** | ⬜ **Unclaimed** | verification/tests | Add contracts roundtrip + engine + llm stats unit tests. Manual validation of All Clear. | P25 |
 
 
