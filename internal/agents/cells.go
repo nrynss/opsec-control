@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
@@ -78,7 +79,9 @@ func aggregateMetrics(a, b contracts.CellMetrics) contracts.CellMetrics {
 	if res.LatencyMS > 0 {
 		res.TokensPerSec = float64(res.TokensOut) / (float64(res.LatencyMS) / 1000.0)
 	} else {
-		res.TokensPerSec = b.TokensPerSec
+		// If both turns had 0 latency, tokensPerSec is technically infinite or undefined.
+		// We default to the best available rate to avoid 0.0 or NaN.
+		res.TokensPerSec = math.Max(a.TokensPerSec, b.TokensPerSec)
 	}
 	return res
 }
@@ -101,25 +104,18 @@ func (b *cellBase) executeLLM(ctx context.Context, systemPrompt, userPrompt stri
 	}
 
 	if b.shouldCritique() {
-		// Serialize a clean draft (without metrics, which are agent-side)
-		draft := struct {
-			Summary         string   `json:"summary"`
-			RiskLevel       string   `json:"riskLevel"`
-			Confidence      float64  `json:"confidence"`
-			StateVersion    int64    `json:"stateVersion"`
-			Recommendations []string `json:"recommendations"`
-			Evidence        []string `json:"evidence"`
-		}{
+		// Use the Pure type to strip metrics for the prompt
+		draft := contracts.CellOutputPure{
+			Cell:            out.Cell,
 			Summary:         out.Summary,
-			RiskLevel:       string(out.RiskLevel),
+			RiskLevel:       out.RiskLevel,
 			Confidence:      out.Confidence,
-			StateVersion:    int64(out.StateVersion),
+			StateVersion:    out.StateVersion,
 			Recommendations: out.Recommendations,
 			Evidence:        out.Evidence,
 		}
 		draftJSON, marshalErr := json.Marshal(draft)
 		if marshalErr != nil {
-			// extremely unlikely; graceful fallback
 			out.Metrics = metrics
 			return out, nil
 		}
@@ -135,7 +131,6 @@ Output ONLY one refined JSON object in the exact same schema. No extra text or m
 
 		refined, refinedResp, cerr := b.callLLM(ctx, systemPrompt, critiqueUser)
 		if cerr != nil {
-			// graceful fallback to draft
 			out.Metrics = metrics
 			return out, nil
 		}
