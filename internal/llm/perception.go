@@ -96,7 +96,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 
 func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) ([]contracts.Event, error) {
 	systemPrompt := "You are an EOC Multimodal Perception Agent. Analyze the aerial drone/satellite image and identify any structural collapses, bridge blockages, fires, or flooding. Output a JSON array of events."
-	
+
 	// Cerebras model for the hackathon (Gemma 4 31B is native multimodal)
 	visionModel := c.model
 
@@ -173,7 +173,7 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 	}
 
 	url := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(c.baseURL, "/"))
-	
+
 	// Acquire semaphore
 	select {
 	case c.sem <- struct{}{}:

@@ -251,6 +251,7 @@ func parseRetryAfter(header string, now time.Time) (time.Duration, bool) {
 }
 
 func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (contracts.LLMResponse, error) {
+	methodStartTime := time.Now()
 	messages := make([]chatMessage, 0, 2)
 	if req.System != "" {
 		messages = append(messages, chatMessage{Role: "system", Content: req.System})
@@ -405,7 +406,7 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 		TokensIn:     tokensIn,
 		TokensOut:    tokensOut,
 		TokensPerSec: tokensPerSec,
-		LatencyMS:    duration.Milliseconds(),
+		LatencyMS:    time.Since(methodStartTime).Milliseconds(),
 	}, nil
 }
 
