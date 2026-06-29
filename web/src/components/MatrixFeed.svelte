@@ -3,6 +3,7 @@
   import { afterUpdate } from 'svelte';
 
   export var logs = [];
+  export var currentProvider = "cerebras";
 
   var feedElement;
 
@@ -11,6 +12,11 @@
       feedElement.scrollTop = feedElement.scrollHeight;
     }
   });
+
+  function capitalize(str) {
+    if (!str) return "";
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
 </script>
 
 <div class="matrix-panel">
@@ -22,7 +28,7 @@
   <div class="matrix-feed" bind:this={feedElement}>
     {#if logs.length === 0}
       <div style="color: var(--text-muted); font-style: italic; font-size: 0.75rem; text-align: center; margin-top: 20px;">
-        Listening for Cerebras telemetry stream...
+        Listening for {capitalize(currentProvider)} telemetry stream...
       </div>
     {:else}
       {#each logs as log, index}
@@ -35,3 +41,4 @@
     {/if}
   </div>
 </div>
+

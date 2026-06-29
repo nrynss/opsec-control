@@ -59,6 +59,7 @@
   var timelineEvents = [];
   var matrixLogs = [];
 
+  var currentProvider = "cerebras";
   var demoMode = true; // Default to demo mode if WS fails or offline
   var ws = null;
   var demoTimer = null;
@@ -120,6 +121,7 @@
 
     // Fallback to fetch initial state
     fetchInitialState();
+    fetchProvider();
 
     return () => {
       if (ws) ws.close();
@@ -137,6 +139,37 @@
       }
     } catch (e) {
       // Keep demo mode active
+    }
+  }
+
+  async function fetchProvider() {
+    try {
+      var res = await fetch("/provider");
+      if (res.ok) {
+        var data = await res.json();
+        if (data.provider) {
+          currentProvider = data.provider;
+        }
+      }
+    } catch (e) {
+      // Keep default
+    }
+  }
+
+  async function changeProvider(e) {
+    var newProvider = e.detail;
+    try {
+      var res = await fetch("/provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: newProvider })
+      });
+      if (res.ok) {
+        currentProvider = newProvider;
+        addLog("SYSTEM", `Active provider set to: ${newProvider.toUpperCase()}`);
+      }
+    } catch (err) {
+      addLog("SYSTEM_ERR", `Failed to switch provider: ${err.message}`);
     }
   }
 
@@ -193,6 +226,12 @@
     addLog(kind ? `WS:${kind.toUpperCase()}` : "CEREBRAS", JSON.stringify(payload));
 
     // Route based on explicit kind if present, otherwise fallback to duck-typing
+    if (kind === "provider") {
+      currentProvider = payload.provider;
+      addLog("SYSTEM", `Provider broadcast received: switched to ${currentProvider.toUpperCase()}`);
+      return;
+    }
+
     if (kind === "state" || (!kind && payload.sectors && payload.bridges)) {
       state = payload;
       return;
@@ -245,7 +284,8 @@
   }
 
   function addLog(prefix, content) {
-    matrixLogs = [...matrixLogs, { prefix, content }];
+    var finalPrefix = prefix === "CEREBRAS" ? currentProvider.toUpperCase() : prefix;
+    matrixLogs = [...matrixLogs, { prefix: finalPrefix, content }];
     if (matrixLogs.length > 100) {
       matrixLogs = matrixLogs.slice(matrixLogs.length - 100);
     }
@@ -508,7 +548,7 @@
 
 <div class="dashboard-container">
   <!-- Top HUD panel -->
-  <HUD {state} {metrics} {demoMode} />
+  <HUD {state} {metrics} {demoMode} {currentProvider} on:changeProvider={changeProvider} />
 
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">
@@ -579,6 +619,6 @@
     </div>
 
     <!-- Matrix Stream Feed -->
-    <MatrixFeed logs={matrixLogs} />
+    <MatrixFeed logs={matrixLogs} {currentProvider} />
   </div>
 </div>

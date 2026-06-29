@@ -198,11 +198,11 @@ To claim: change the cell to 🔵 with your builder name + date in the same comm
 | **P9** | ✅ **Done** — DeepSeek V4 Pro (2026-06-29) | `internal/llm` | Add OpenRouter as alternative provider. Extend client for OpenAI-compatible /chat/completions + vision. Support separate OPENROUTER_* env vars (key, baseURL, model). Make provider switchable (global). Update prompt/schema handling if needed. Add mocks for both. 26 tests pass (13 original + 10 new P9 + 3 additional). | P8 |
 | **P10** | ✅ **Done** — Grok Builder (2026-06-29) | `internal/api` | Add global provider switch API: GET/POST /provider to read/set current provider (cerebras/openrouter). Wire through to llm client. Broadcast change over WS. | P9 |
 | **P11** | ✅ **Done** — DeepSeek V4 Pro (2026-06-29) | `cmd/eoc` | Support multiple LLM clients (or switchable one) for global provider. Update main wiring, app state, broadcast. Initial provider from env or default. | P6, P9, P10 |
-| **P12** | ⬜ **Unclaimed** | `web/` | Add global provider dropdown (e.g. HUD or controls). Call /provider on change. Update all "CEREBRAS"/logs to reflect current provider. | P10, P11 |
+| **P12** | ✅ **Done** — Antigravity Builder (2026-06-29) | `web/` | Add global provider dropdown (e.g. HUD or controls). Call /provider on change. Update all "CEREBRAS"/logs to reflect current provider. | P10, P11 |
 | **P13** | ⬜ **Unclaimed** — **scoped in [`TASK-ui-scrollback.md`](TASK-ui-scrollback.md)** | `web/` | UI layout fixes: Make map smaller (too big currently). Enlarge data point areas (HUD metrics, panels, timeline, matrix, commander). | — (independent of P9–P12; see task doc) |
 | **P14** | ⬜ **Unclaimed** — **scoped in [`TASK-ui-scrollback.md`](TASK-ui-scrollback.md)** | `web/` | Make timeline, matrix feed, logs hold full history + proper scrolling (instead of refresh/overwrite). **Decision: everything accumulates** — feeds + Commander COP + specialist Cell outputs all become scrolling histories. | — (independent of P9–P12; see task doc) |
 | **P15** | ⬜ **Unclaimed** | `web/` | Additional UI polish: improve controls, badges, perception panel, live vs demo clarity, general layout/responsiveness. | P14 |
-| **P16** | ⬜ **Unclaimed** | deploy/build + docs | Document OPENROUTER_* in .env.example + hosting.md. Update any deploy notes for dual providers. Validate both providers work for text + vision. | P8, P9 |
+| **P16** | 🔵 **Claimed — Claude Builder (2026-06-29)** | deploy/build + docs | Document OPENROUTER_* in .env.example + hosting.md. Update any deploy notes for dual providers. Validate both providers work for text + vision. | P8, P9 |
 
 ### Deploy decision (2026-06-29): single-origin
 Per [`hosting.md`](hosting.md): **one Go container serves both the static

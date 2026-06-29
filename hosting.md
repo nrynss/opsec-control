@@ -24,11 +24,11 @@ graph TD
     CF -->|proxied CNAME| GCR[Google Cloud Run<br/>single Go container]
     subgraph GCR_SVC [eoc-backend on :PORT]
       Static[Static dashboard<br/>web/dist at /]
-      API[API: /state /agents /timeline /events]
+      API[API: /state /agents /timeline /events /provider]
       WS[WebSocket: /stream]
     end
     GCR --> GCR_SVC
-    GCR_SVC -->|HTTPS| Cerebras[Cerebras Wafer-Scale API<br/>Gemma 4 31B]
+    GCR_SVC -->|HTTPS| LLM[LLM provider — runtime-switchable<br/>Cerebras Gemma 4 31B · OpenRouter]
 ```
 
 One container, one origin:
@@ -48,7 +48,8 @@ One container, one origin:
 - The container build produces a single image containing both the Go binary and
   `web/dist` (multi-stage `Dockerfile`; see parcel **P8**).
 - Local development / testing can use `.env.example` (copy to `.env`) for
-  `PORT`, `WEB_DIR`, `CEREBRAS_*`.
+  `PORT`, `WEB_DIR`, `CEREBRAS_*`, and `OPENROUTER_*` (see §4.1 for the
+  dual-provider model).
 
 ---
 
@@ -85,9 +86,13 @@ gcloud run deploy eoc-backend \
     --allow-unauthenticated \
     --min-instances 1 \
     --timeout 3600 \
-    --set-secrets CEREBRAS_API_KEY=cerebras-api-key:latest \
-    --set-env-vars CEREBRAS_MODEL=gemma-4-31b
+    --set-secrets CEREBRAS_API_KEY=cerebras-api-key:latest,OPENROUTER_API_KEY=openrouter-api-key:latest \
+    --set-env-vars CEREBRAS_MODEL=gemma-4-31b,OPENROUTER_MODEL=google/gemma-4-31b-it
 ```
+
+> `OPENROUTER_*` are **optional** — drop them to ship a Cerebras-only service.
+> Include them to enable the runtime provider switch (§4.1). Base URLs default
+> correctly (`api.cerebras.ai/v1`, `openrouter.ai/api/v1`) and rarely need setting.
 
 Notes:
 - **Do not pass `--port`** unless you have a reason to; Cloud Run injects `$PORT`
@@ -102,12 +107,50 @@ Notes:
   history. Create it once:
   `printf '%s' "$KEY" | gcloud secrets create cerebras-api-key --data-file=-`.
   (If you must, `--set-env-vars CEREBRAS_API_KEY=...` works but is less safe.)
+  Create the OpenRouter secret the same way:
+  `printf '%s' "$KEY" | gcloud secrets create openrouter-api-key --data-file=-`.
 - `gemma-4-31b` is native multimodal — the same model serves text reasoning and
-  image perception (`POST /perception`, parcels P2/P5).
+  image perception (`POST /perception`, parcels P2/P5). The OpenRouter default
+  (`google/gemma-4-31b-it`) is the same model family, so vision works on both.
 
 Cloud Run prints the service URL (e.g. `https://eoc-backend-xxxx.a.run.app`).
 Verify before wiring DNS: open the URL — the dashboard should load and connect to
 its own `/stream` in **live** mode (not demo mode).
+
+---
+
+## 4.1 Dual-provider configuration & switching (P9–P12)
+
+The server runs **one LLM client** that can speak to either **Cerebras** or
+**OpenRouter** (OpenAI-compatible). Both speak text reasoning *and* vision.
+
+**Per-provider config** (env or Secret Manager):
+
+| Provider | Key | Model (default) | Base URL (default) |
+|---|---|---|---|
+| Cerebras | `CEREBRAS_API_KEY` | `CEREBRAS_MODEL` = `gemma-4-31b` | `https://api.cerebras.ai/v1` |
+| OpenRouter | `OPENROUTER_API_KEY` | `OPENROUTER_MODEL` = `google/gemma-4-31b-it` | `https://openrouter.ai/api/v1` |
+
+**Which provider is active at boot** (current behavior — [`cmd/eoc/main.go`](cmd/eoc/main.go)):
+1. Defaults to **Cerebras**.
+2. Falls back to **OpenRouter** *only* if `CEREBRAS_API_KEY` is **unset** *and*
+   `OPENROUTER_API_KEY` is **set**.
+3. If neither key is set (or `LLM_MOCK=true`), the client runs in **mock mode**
+   (deterministic canned responses — fine for a UI demo, no spend).
+
+> ⚠️ **Gap:** there is no explicit env var to force OpenRouter at boot when a
+> Cerebras key is *also* present. With both keys set you boot on Cerebras and must
+> switch at runtime (below). A small follow-up (an `LLM_PROVIDER` override) lives
+> in the `cmd/eoc` lane (P11), not this docs parcel.
+
+**Switching at runtime** (no redeploy — P10/P11/P12):
+- `GET /provider` → `{"provider":"cerebras"}` (current active provider).
+- `POST /provider` with `{"provider":"openrouter"}` → switches the active client;
+  the change is **broadcast over `/stream`** so every connected dashboard updates.
+- The UI exposes this as a **provider dropdown** (P12); selecting an option calls
+  `POST /provider`, and logs/labels reflect the active provider.
+- Switching to a provider whose key is **unconfigured** drops that provider into
+  **mock mode** — set both keys if you want to demo a live A/B between them.
 
 ---
 
@@ -136,6 +179,11 @@ That's the only DNS record needed — UI, API, and WSS all ride the one origin.
       the demo cascade).
 - [ ] WSS stays connected through a full scenario replay (no 5-min cutoff).
 - [ ] No CORS errors in the browser console (there shouldn't be — same origin).
+- [ ] **Cerebras**: with `CEREBRAS_API_KEY` set, text reasoning (cell fan-out) and
+      vision (`POST /perception`) both return real (non-mock) output.
+- [ ] **OpenRouter**: with `OPENROUTER_API_KEY` set, `POST /provider`
+      `{"provider":"openrouter"}` switches live; text + vision both work; the
+      switch is reflected in the dashboard (dropdown + logs) via `/stream`.
 
 ---
 
