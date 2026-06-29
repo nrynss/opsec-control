@@ -53,6 +53,7 @@
     if (file.size > 10 * 1024 * 1024) {
       uploadState = "error";
       statusMessage = "Payload too large (max 10MB)";
+      thumbnail = null;
       dispatch('error', statusMessage);
       return;
     }
