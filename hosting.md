@@ -47,6 +47,8 @@ One container, one origin:
   directory in `WEB_DIR` (default `web/dist`) at `/`.
 - The container build produces a single image containing both the Go binary and
   `web/dist` (multi-stage `Dockerfile`; see parcel **P8**).
+- Local development / testing can use `.env.example` (copy to `.env`) for
+  `PORT`, `WEB_DIR`, `CEREBRAS_*`.
 
 ---
 

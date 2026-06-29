@@ -1,15 +1,16 @@
-.git/
-.github/
-.gcourer/
-.task/
-**/node_modules/
-web/dist/
-web/.astro/
-web/.output/
+# Ignore for Docker build context (speeds up multi-stage build for P8)
+.git
+.gitignore
+node_modules/
+web/node_modules/
+*.exe
 bin/
-dist/
+eoc.exe
+*.log
 coverage.out
-coverage.html
+dist/
+# Keep web/dist for reference, but Dockerfile rebuilds it
+# .env*
 *.md
-.env
-.env.*
+reviews/
+obsolete/

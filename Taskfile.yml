@@ -90,6 +90,14 @@ tasks:
       - npm run build
 
   docker:build:
-    desc: Build the Linux container image (the build authority — SPEC §19.3)
+    desc: |
+      Build the multi-stage Linux container (P8).
+      Node stage → web/dist, Go stage → eoc binary, distroless runtime with both.
+      Single-origin serving of dashboard + API/WS (see hosting.md).
     cmds:
       - docker build -t opsec-control:dev .
+
+  docker:run:
+    desc: Run the container locally for validation (P8). Use -e PORT=9090 etc.
+    cmds:
+      - docker run --rm -e PORT=9090 -e WEB_DIR=/web/dist -p 9090:9090 opsec-control:dev

@@ -62,7 +62,7 @@ orchestrator fan-out of 2–3 Cells → Commander → dashboard.
 - **P1 (contracts, §0.5 additive):** HUD telemetry — `CellMetrics`+`CellOutput.Metrics`, `COPMetrics`+`COP.Metrics`, `LLMResponse.LatencyMS`; contracttest extended. **Unblocks P2–P5.**
 - **Planning:** authored [`TASK-state-completeness.md`](TASK-state-completeness.md); reviewed the BUG-4/5 impl; parceled the Cerebras-effectiveness work (§8, P1–P8) and rewrote [`hosting.md`](hosting.md) for single-origin deploy.
 - Verified: `go build`/`vet`/`gofmt`/`go test ./...` + `contracttest` all green.
-- **Next (open):** P5 (`POST /perception` in api) — done by Grok; remaining: P6 (cmd/eoc wiring/serve + all-6), P7 (web), P8 (docker). (P2–P5 landed.)
+- **Next (open):** P9–P16 (multi-provider support with global switch + UI fixes for map size, data areas, and persistent scrolling logs). All prior parcels (P1–P8) landed.
 
 ### 3.1 Remaining work & parallelism (post-spine)
 
@@ -194,7 +194,15 @@ To claim: change the cell to 🔵 with your builder name + date in the same comm
 | **P5** | ✅ **Done** — Grok Builder (2026-06-29) | `internal/api` | `POST /perception` (multipart or raw bytes → `Perception.Interpret` → publish events to bus). Inject a `Perception` dependency into `Server`. Handler stamps sim time for validity + publishes to bus. Tests + isolation green. | P1 ✅, P2 |
 | **P6** | ✅ **Done** — DeepSeek V4 Pro (2026-06-29) | `cmd/eoc` (integration root — **single owner of `main.go`**) | (a) **Serve static `web/dist` at `/`** (dir from `WEB_DIR`, default `web/dist`) alongside the API routes + `/stream`; (b) **honor `$PORT`** (Cloud Run contract, fallback `8080`); (c) wire the perception client into `api.New`; (d) **register all 6 cells** (Intelligence, Infrastructure, Medical, Population, Communications, Commander) — decided 2026-06-29; the `llm` semaphore queues the 5th specialist under the 4-cap. All four sub-tasks landed, `go build` + `go test ./...` + `contracttest` green. | P2, P5, P3(d) |
 | **P7** | ✅ **Done** — Antigravity Builder (2026-06-29) | `web/` | HUD reads `cop.metrics` (real tok/s + fan-out latency, replacing the hardcoded `1500`); add a drone/satellite image upload widget → `POST /perception`. **Single-origin (see §8 deploy decision): keep the existing same-origin WS/fetch — do NOT add a `PUBLIC_API_URL`.** | P1 ✅ (shapes), running `api` |
-| **P8** | ⬜ **Unclaimed** | `Dockerfile` + `Taskfile.yml` + `.env.example` (deploy/build lane; `hosting.md` already done) | **Multi-stage image**: Node stage builds `web/dist` → Go stage builds `eoc` → distroless runtime carrying the binary **and** `web/dist`. Add a `docker:build`/deploy Taskfile target; document `PORT`/`WEB_DIR`/`CEREBRAS_*` in `.env.example`. Validate: `docker run -e PORT=9090 -p 9090:9090 <img>` serves the dashboard live. | P6 behavior (serves `WEB_DIR`, honors `$PORT`) + a working `web` build |
+| **P8** | ✅ **Done** — Grok Builder (2026-06-29) | `Dockerfile` + `Taskfile.yml` + `.env.example` (deploy/build lane; `hosting.md` already done) | **Multi-stage image**: Node stage builds `web/dist` → Go stage builds `eoc` → distroless runtime carrying the binary **and** `web/dist`. Add a `docker:build`/deploy Taskfile target; document `PORT`/`WEB_DIR`/`CEREBRAS_*` in `.env.example`. Validate: `docker run -e PORT=9090 -p 9090:9090 <img>` serves the dashboard live. | P6 behavior (serves `WEB_DIR`, honors `$PORT`) + a working `web` build |
+| **P9** | ⬜ **Unclaimed** | `internal/llm` | Add OpenRouter as alternative provider. Extend client for OpenAI-compatible /chat/completions + vision. Support separate OPENROUTER_* env vars (key, baseURL, model). Make provider switchable (global). Update prompt/schema handling if needed. Add mocks for both. | P8 |
+| **P10** | ⬜ **Unclaimed** | `internal/api` | Add global provider switch API: GET/POST /provider to read/set current provider (cerebras/openrouter). Wire through to llm client. Broadcast change over WS. | P9 |
+| **P11** | ⬜ **Unclaimed** | `cmd/eoc` | Support multiple LLM clients (or switchable one) for global provider. Update main wiring, app state, broadcast. Initial provider from env or default. | P6, P9, P10 |
+| **P12** | ⬜ **Unclaimed** | `web/` | Add global provider dropdown (e.g. HUD or controls). Call /provider on change. Update all "CEREBRAS"/logs to reflect current provider. | P10, P11 |
+| **P13** | ⬜ **Unclaimed** | `web/` | UI layout fixes: Make map smaller (too big currently). Enlarge data point areas (HUD metrics, panels, timeline, matrix, commander). | P12 |
+| **P14** | ⬜ **Unclaimed** | `web/` | Make timeline, matrix feed, logs hold full history + proper scrolling (instead of refresh/overwrite). | P13 |
+| **P15** | ⬜ **Unclaimed** | `web/` | Additional UI polish: improve controls, badges, perception panel, live vs demo clarity, general layout/responsiveness. | P14 |
+| **P16** | ⬜ **Unclaimed** | deploy/build + docs | Document OPENROUTER_* in .env.example + hosting.md. Update any deploy notes for dual providers. Validate both providers work for text + vision. | P8, P9 |
 
 ### Deploy decision (2026-06-29): single-origin
 Per [`hosting.md`](hosting.md): **one Go container serves both the static
@@ -209,10 +217,15 @@ CORS, removes the Cloudflare-Pages target, and matches the code unchanged.
 2. **P2 / P3 / P4 / P5** in parallel (distinct lanes, all depend only on P1).
 3. **P6** — start (a)+(b) (static serving + `$PORT`) immediately; finish (c)+(d) once P2+P5 land.
 4. **P7** once P1 shapes exist + `api` is running; **P8** once P6's serving behavior + a `web` build exist.
+5. **P9** (llm OpenRouter support) + **P10** (api switch) + **P11** (cmd wiring) can run in parallel (backend lanes).
+6. **P12** (UI dropdown) after backend switch surface.
+7. **P13–P15** (UI layout fixes, scrolling, polish) – UI lane work, can overlap with backend once switch is there.
+8. **P16** (docs/deploy) last.
 
 **Independence guarantee:** each parcel owns a disjoint set of files —
 P1=`contracts/`, P2=`internal/llm`, P3=`internal/agents`, P4=`internal/orchestrator`,
-P5=`internal/api`, P6=`cmd/eoc/main.go`, P7=`web/`, P8=`Dockerfile`+`Taskfile.yml`+`.env.example`.
+P5=`internal/api`, P6=`cmd/eoc/main.go`, P7=`web/`, P8=`Dockerfile`+`Taskfile.yml`+`.env.example`,
+P9=`internal/llm`, P10=`internal/api`, P11=`cmd/eoc`, P12–P15=`web/`, P16=deploy/docs.
 The only shared seam is `contracts/` (P1), so land P1 first; after that the rest
 never touch the same file.
 
@@ -224,3 +237,5 @@ never touch the same file.
    image → instant fan-out" wow moment.
 3. **Critique** (P3) — the "multi-turn still sub-second on Cerebras" beat;
    cheapest to add, mind RPM.
+4. **P9–P11** enable provider comparison (global switch to OpenRouter for same model).
+5. **P13–P15** address current UI problems (map too big, data areas too small, logs refresh instead of hold+scroll) + general polish.
