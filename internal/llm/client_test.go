@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -942,5 +943,31 @@ func TestPerceptionIncrementsStats(t *testing.T) {
 	tin, tout := c.TotalTokens()
 	if tin == 0 || tout == 0 {
 		t.Errorf("Interpret should increment tokens: in=%d out=%d", tin, tout)
+	}
+}
+
+// TestTokenStats_AllClearReset directly exercises the P26 All Clear flow:
+// accumulate usage, call ResetStats (as done on backend reset), verify zeroed counters.
+func TestTokenStats_AllClearReset(t *testing.T) {
+	t.Setenv("LLM_MOCK", "true")
+	c := NewClient(Config{})
+
+	// Simulate activity (as cells + commander would)
+	for i := 0; i < 3; i++ {
+		_, _ = c.Complete(context.Background(), contracts.LLMRequest{
+			System: "test", User: fmt.Sprintf("turn %d", i),
+		})
+	}
+
+	in, out := c.TotalTokens()
+	if in == 0 || out == 0 || c.TotalRequests() != 3 {
+		t.Fatalf("pre-reset: in=%d out=%d req=%d", in, out, c.TotalRequests())
+	}
+
+	c.ResetStats()
+
+	in, out = c.TotalTokens()
+	if in != 0 || out != 0 || c.TotalRequests() != 0 {
+		t.Errorf("after All Clear ResetStats: in=%d out=%d req=%d, want 0", in, out, c.TotalRequests())
 	}
 }

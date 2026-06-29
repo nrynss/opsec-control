@@ -364,3 +364,154 @@ func TestEngine_StatsMethods(t *testing.T) {
 		t.Errorf("wall after reset = %d, want 0", ms)
 	}
 }
+
+// TestEngine_WallElapsedAccumulation verifies wall time starts on activity,
+// accumulates only while running, and stops on pause/reset.
+func TestEngine_WallElapsedAccumulation(t *testing.T) {
+	bus := &mockBus{}
+	eng := New(bus)
+
+	sc := makeScenario([]contracts.Event{
+		{ID: "e1", Timestamp: 0, Source: "s", Type: contracts.EventMainshockOccurred, Confidence: 1},
+		{ID: "e2", Timestamp: 1, Source: "s", Type: contracts.EventBridgeClosed, Confidence: 1},
+	})
+	_ = eng.Load(sc)
+
+	if ms := eng.WallElapsedMS(); ms != 0 {
+		t.Fatalf("wall before any activity = %d, want 0", ms)
+	}
+
+	_, _ = eng.Step() // starts wall
+	time.Sleep(8 * time.Millisecond)
+	ms1 := eng.WallElapsedMS()
+	if ms1 < 1 {
+		t.Errorf("wall after step too small: %d", ms1)
+	}
+
+	eng.Pause()
+	time.Sleep(10 * time.Millisecond)
+	ms2 := eng.WallElapsedMS()
+	if ms2 != ms1 {
+		t.Error("wall must not advance while paused")
+	}
+
+	eng.Resume()
+	time.Sleep(8 * time.Millisecond)
+	ms3 := eng.WallElapsedMS()
+	if ms3 <= ms2 {
+		t.Errorf("wall did not advance after resume: %d <= %d", ms3, ms2)
+	}
+
+	eng.Reset()
+	if ms := eng.WallElapsedMS(); ms != 0 {
+		t.Errorf("wall after reset = %d, want 0", ms)
+	}
+}
+
+// TestEngine_StatusLifecycle covers all status values per P20/P26.
+func TestEngine_StatusLifecycle(t *testing.T) {
+	bus := &mockBus{}
+	eng := New(bus)
+
+	if got := eng.Status(); got != "idle" {
+		t.Errorf("no scenario: %q", got)
+	}
+
+	sc := makeScenario([]contracts.Event{
+		{ID: "e1", Timestamp: 5, Source: "s", Type: contracts.EventMainshockOccurred, Confidence: 1},
+	})
+	_ = eng.Load(sc)
+	if got := eng.Status(); got != "running" {
+		t.Errorf("after load: %q", got)
+	}
+
+	eng.Pause()
+	if got := eng.Status(); got != "paused" {
+		t.Errorf("after pause: %q", got)
+	}
+
+	eng.Resume()
+	if got := eng.Status(); got != "running" {
+		t.Errorf("after resume: %q", got)
+	}
+
+	_, _ = eng.Step() // consume the only event
+	if got := eng.Status(); got != "complete" {
+		t.Errorf("after consuming all: %q", got)
+	}
+
+	eng.Reset()
+	if got := eng.Status(); got != "running" {
+		t.Errorf("after reset from complete: %q", got)
+	}
+}
+
+// TestEngine_InfoBounds verifies scenario name and time bounds from last event.
+func TestEngine_InfoBounds(t *testing.T) {
+	bus := &mockBus{}
+	eng := New(bus)
+
+	info := eng.Info()
+	if info.Name != "" || info.StartTime != 0 || info.EndTime != 0 {
+		t.Errorf("empty info: %+v", info)
+	}
+
+	sc := makeScenario([]contracts.Event{
+		{ID: "e0", Timestamp: 0, Source: "s", Type: contracts.EventMainshockOccurred, Confidence: 1},
+		{ID: "e1", Timestamp: 42, Source: "s", Type: contracts.EventBridgeClosed, Confidence: 1},
+	})
+	sc.Name = "my-cascade"
+	_ = eng.Load(sc)
+
+	info = eng.Info()
+	if info.Name != "my-cascade" || info.StartTime != 0 || info.EndTime != 42 {
+		t.Errorf("info = %+v, want name=my-cascade start=0 end=42", info)
+	}
+}
+
+// TestEngine_DeterminismFirewall_WallStats strengthens the firewall:
+// performing operations with artificial wall delays must produce identical
+// logical results (events, current time) as without delays.
+func TestEngine_DeterminismFirewall_WallStats(t *testing.T) {
+	sc := makeScenario([]contracts.Event{
+		{ID: "a", Timestamp: 10, Source: "s", Type: contracts.EventMainshockOccurred, Confidence: 1},
+		{ID: "b", Timestamp: 20, Source: "s", Type: contracts.EventAftershockOccurred, Confidence: 1},
+	})
+
+	// Fast path (no sleeps)
+	bus1 := &mockBus{}
+	e1 := New(bus1)
+	_ = e1.Load(sc)
+	for {
+		more, _ := e1.Step()
+		if !more {
+			break
+		}
+	}
+
+	// Slow path with sleeps (simulates wall time variance)
+	bus2 := &mockBus{}
+	e2 := New(bus2)
+	_ = e2.Load(sc)
+	for {
+		more, _ := e2.Step()
+		time.Sleep(3 * time.Millisecond) // artificial delay
+		if !more {
+			break
+		}
+	}
+
+	p1 := bus1.published()
+	p2 := bus2.published()
+	if len(p1) != len(p2) {
+		t.Fatalf("event count differed under wall delay: %d vs %d", len(p1), len(p2))
+	}
+	for i := range p1 {
+		if p1[i].ID != p2[i].ID || p1[i].Timestamp != p2[i].Timestamp {
+			t.Errorf("event %d differed due to wall time: %+v vs %+v", i, p1[i], p2[i])
+		}
+	}
+	if e1.CurrentTime() != e2.CurrentTime() {
+		t.Error("current time diverged due to wall delays")
+	}
+}
