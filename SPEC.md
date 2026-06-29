@@ -287,6 +287,8 @@ Degradation is largely one-way within an episode (no magic repairs mid-demo); re
 | **Fire zone** | ignited → spreading → contained → out | forward + contain/out |
 | **Flood** | extent polygons + depth; monotonic ↑ within episode unless explicit recession | numeric |
 
+Note (BUG-4/5 B1): BuildingCollapsed and TunnelClosed are accepted trigger-only events for anomaly classification (Intelligence/Infrastructure wake) but track no entity in the MVD WorldState model (no Building/Tunnel per §8.4 table; collapses are narrative in §8.5 only). Road/Bridge/Power have full state entities and handlers.
+
 ### 8.5 The three-act cascade
 
 One disaster, five hazard types, all six cells busy throughout:

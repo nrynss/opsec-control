@@ -51,6 +51,19 @@ Builder's lane — see [`web/README.md`](web/README.md)).
 **MVD build order (SPEC §13):** scenario+sim → events → state → anomaly →
 orchestrator fan-out of 2–3 Cells → Commander → dashboard.
 
+**Claimed (2026-06-29) — BUG-4/BUG-5 state-completeness** ([`TASK-state-completeness.md`](TASK-state-completeness.md)):
+- Full Part A: Road entity + EventRoadBlocked handler; EventBridgeCollapsed + PowerDegraded.
+- Part B1: BuildingCollapsed / TunnelClosed documented as deliberate trigger-only (no entity) + pinning tests.
+- Contract change per §0.5 (additive only), LegalRoad bidirectional, wake rules, all tests + contracttest, acceptance criteria.
+
+**Claimed by Claude Builder (2026-06-29) — review hardening, P1 contracts, deploy planning:**
+- **Review fixes** (from 4 LLM code reviews): BUG-1 mock LLM honors `ctx` cancellation; BUG-2 `Envelope` rejects negative timestamps; BUG-3 seeded LLM backoff `rand` (determinism §0.2 r5); BUG-7 removed dead `orch` field from `api.Server`. Tests added.
+- **Repo-wide `modernize` sweep:** `maps.Copy`, range-over-int, `atomic.Int32`, `slices.Contains`, `t.Context`, tagged switch, `any` — zero gopls hints remain.
+- **P1 (contracts, §0.5 additive):** HUD telemetry — `CellMetrics`+`CellOutput.Metrics`, `COPMetrics`+`COP.Metrics`, `LLMResponse.LatencyMS`; contracttest extended. **Unblocks P2–P5.**
+- **Planning:** authored [`TASK-state-completeness.md`](TASK-state-completeness.md); reviewed the BUG-4/5 impl; parceled the Cerebras-effectiveness work (§8, P1–P8) and rewrote [`hosting.md`](hosting.md) for single-origin deploy.
+- Verified: `go build`/`vet`/`gofmt`/`go test ./...` + `contracttest` all green.
+- **Next (open):** P2 (llm metrics + `Interpret`), P3 (agents metrics + critique + Intelligence/Communications constructors), P4 (orchestrator aggregation), P5 (`POST /perception`), P6 (cmd/eoc serving + `$PORT` + register all 6), P7 (web HUD + upload), P8 (multi-stage image).
+
 ### 3.1 Remaining work & parallelism (post-spine)
 
 The reasoning spine (sim → events → state → anomaly → orchestrator → Cells →
@@ -139,3 +152,72 @@ Your package builds in isolation, ships unit tests, **passes the full
 `contracttest` suite**, is `gofmt`-clean, and touched **no files outside your
 lane** (except a coordinated §0.5 contract commit). Green Linux CI = green
 everywhere.
+
+## 8. Cerebras-effectiveness work parcels (hackathon, 2026-06-29)
+
+Source: [`CEREBRAS-EFFECTIVENESS.md`](CEREBRAS-EFFECTIVENESS.md). Four gaps between
+the "wafer-scale parallel reasoning" thesis and the current build. Parceled by
+lane so they run mostly in parallel **after the one contracts change (P1) lands**.
+
+### Reality check vs. the doc (read before picking a parcel)
+- **The hard 4-concurrent ceiling (§6) is the real constraint — NOT the client
+  cap.** Raising `llm` `maxConcurrency` 4→6 does not speed anything up; it trades
+  client-side queueing for server-side HTTP 429 + backoff (i.e. *worse* latency).
+  The real lever is *how many cells fan out at once* (cell roster) and/or a higher
+  Cerebras account limit.
+- **Roster decision (2026-06-29): register all 6 cells.** A mainshock now wakes
+  **5 specialists** → 5 concurrent calls against the 4-cap. The `llm` client's
+  semaphore (`maxConcurrency=4`) **is the queue**: 4 run immediately, the 5th
+  blocks on the channel (Go serves blocked senders FIFO) until a slot frees, then
+  runs — so we **never exceed 4 in-flight and never trip a 429**. With near-instant
+  Cerebras inference the 5th's wait ≈ one request-duration (negligible).
+  **Keep `maxConcurrency=4`; do NOT raise it** — raising removes the queue and
+  causes server-side 429s + backoff (worse). This also **resolves BUG-6** (anomaly
+  was waking unregistered Intelligence/Communications). Caveat: all-6 ×
+  (optional critique) multiplies *total* requests → watch the 100 RPM / 100k TPM
+  budget; gate critique (P3) accordingly.
+- **Critique loops don't raise *peak* concurrency** (each cell holds one in-flight
+  request at a time), but they multiply **total** requests → keep plan→critique
+  **sequential within a cell** and watch the 100 RPM / 100k TPM budget.
+
+### Parcels
+
+| ID | Lane / owner | Work | Depends on |
+|----|--------------|------|-----------|
+| **P1** | `internal/contracts/` (§0.5 — do FIRST, isolated commit) | Add `CellMetrics{tokensIn,tokensOut,tokensPerSec,latencyMs}` + `CellOutput.Metrics`; `COPMetrics{fanOutLatencyMs,totalTokensIn,totalTokensOut,peakTokensPerSec,cellCount}` + `COP.Metrics`; `LLMResponse.LatencyMS`. All **additive**. (`Perception`/`ImageInput` already exist.) | — |
+| **P2** | `internal/llm` | Populate `LatencyMS` (real + mock); implement `Interpret` in new `perception.go` (mock + Cerebras vision `gemma-4-31b`, base64 data-URI, structured `[]Event`); **keep `maxConcurrency=4` (the semaphore IS the FIFO queue — never raise; see reality-check)**; optionally expose queue depth / wait-time as telemetry. | P1 |
+| **P3** | `internal/agents` | **Add `NewIntelligence` + `NewCommunications` cell constructors** (mirror the existing 4; seismic/intel + comms prompts; mock responses already exist) so all 6 can be registered. `executeLLM` writes real metrics into `CellOutput.Metrics`; add **sequential** plan→critique pass (env-gated `LLM_CRITIQUE`, graceful fallback to draft on failure), aggregating tokens + latency. | P1 |
+| **P4** | `internal/orchestrator` | Time the fan-out (wall clock around phase-1/2); aggregate specialist + Commander metrics into `COP.Metrics`. | P1, P3 |
+| **P5** | `internal/api` | `POST /perception` (multipart or raw bytes → `Perception.Interpret` → publish events to bus). Inject a `Perception` dependency into `Server`. | P1, P2 |
+| **P6** | `cmd/eoc` (integration root — **single owner of `main.go`**) | (a) **Serve static `web/dist` at `/`** (dir from `WEB_DIR`, default `web/dist`) alongside the API routes + `/stream`; (b) **honor `$PORT`** (Cloud Run contract, fallback `8080`); (c) wire the perception client into `api.New`; (d) **register all 6 cells** (Intelligence, Infrastructure, Medical, Population, Communications, Commander) — decided 2026-06-29; the `llm` semaphore queues the 5th specialist under the 4-cap. Sub-tasks (a)+(b) have **no deps and can land first**; (c) needs P2+P5; (d) needs P3's new Intelligence/Communications constructors. | P2, P5, P3(d) |
+| **P7** | `web/` | HUD reads `cop.metrics` (real tok/s + fan-out latency, replacing the hardcoded `1500`); add a drone/satellite image **upload widget** → `POST /perception`. **Single-origin (see §8 deploy decision): keep the existing same-origin WS/fetch — do NOT add a `PUBLIC_API_URL`.** | P1 (shapes), running `api` |
+| **P8** | `Dockerfile` + `Taskfile.yml` + `.env.example` (deploy/build lane; `hosting.md` already done) | **Multi-stage image**: Node stage builds `web/dist` → Go stage builds `eoc` → distroless runtime carrying the binary **and** `web/dist`. Add a `docker:build`/deploy Taskfile target; document `PORT`/`WEB_DIR`/`CEREBRAS_*` in `.env.example`. Validate: `docker run -e PORT=9090 -p 9090:9090 <img>` serves the dashboard live. | P6 behavior (serves `WEB_DIR`, honors `$PORT`) + a working `web` build |
+
+### Deploy decision (2026-06-29): single-origin
+Per [`hosting.md`](hosting.md): **one Go container serves both the static
+dashboard (`web/dist`) and the API/WS**, fronted by Cloudflare. Chosen because the
+frontend is hard-coded **same-origin** (WS `wss://<page-host>/stream`, relative
+`fetch("/state")`); a two-subdomain split would silently drop the live demo to
+offline demo mode and would need CORS the API doesn't have. Single-origin removes
+CORS, removes the Cloudflare-Pages target, and matches the code unchanged.
+
+### Suggested sequence (parcels are lane-isolated → run independently)
+1. **P1** (contracts) — unblocks everything; lands as the single coordinated commit.
+2. **P2 / P3 / P4 / P5** in parallel (distinct lanes, all depend only on P1).
+3. **P6** — start (a)+(b) (static serving + `$PORT`) immediately; finish (c)+(d) once P2+P5 land.
+4. **P7** once P1 shapes exist + `api` is running; **P8** once P6's serving behavior + a `web` build exist.
+
+**Independence guarantee:** each parcel owns a disjoint set of files —
+P1=`contracts/`, P2=`internal/llm`, P3=`internal/agents`, P4=`internal/orchestrator`,
+P5=`internal/api`, P6=`cmd/eoc/main.go`, P7=`web/`, P8=`Dockerfile`+`Taskfile.yml`+`.env.example`.
+The only shared seam is `contracts/` (P1), so land P1 first; after that the rest
+never touch the same file.
+
+### Priority for demo impact
+1. **Telemetry** (P1 + P3 + P4 + HUD half of P7) — turns the HUD's fake
+   `1500 tok/s` into real wafer-scale numbers. Highest value-per-effort, fully
+   verifiable in mock mode.
+2. **Perception** (P2 + P5 + P6 + upload half of P7) — the live "drop a disaster
+   image → instant fan-out" wow moment.
+3. **Critique** (P3) — the "multi-turn still sub-second on Cerebras" beat;
+   cheapest to add, mind RPM.
