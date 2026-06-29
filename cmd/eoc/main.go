@@ -169,7 +169,7 @@ func main() {
 
 	// --- HTTP/WS edge ---
 	mux := http.NewServeMux()
-	api.New(store, bus, tl, cop).Register(mux)
+	api.New(store, bus, tl, cop, llmClient).Register(mux)
 	mux.Handle("/stream", wsSrv.Handler())
 	httpSrv := &http.Server{Addr: *addr, Handler: mux}
 
