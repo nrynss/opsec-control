@@ -71,20 +71,20 @@ func TestBroadcastConcurrent(t *testing.T) {
 	// Exercise concurrent Broadcast + publishes (run under -race to verify fix).
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			s.Broadcast(map[string]int{"seq": i})
 		}
 		close(done)
 	}()
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		bus.Publish(contracts.Event{ID: "e", Type: contracts.EventMainshockOccurred})
 	}
 
 	<-done
 	// Drain a couple messages to confirm no panic/crash.
 	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		_, _, _ = conn.ReadMessage()
 	}
 }

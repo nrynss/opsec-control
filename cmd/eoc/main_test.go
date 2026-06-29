@@ -89,8 +89,7 @@ func TestBusPathAppliesAllEvents(t *testing.T) {
 	a, scn := newTestApp(t)
 	bus := events.New(128)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	ch, unsub := bus.Subscribe() // subscribe BEFORE publishing
 	defer unsub()

@@ -90,7 +90,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 
 // Broadcast can be used to push arbitrary messages (e.g. COP or token streams).
 // Writes are serialized per client.
-func (s *Server) Broadcast(msg interface{}) {
+func (s *Server) Broadcast(msg any) {
 	data, _ := json.Marshal(msg)
 	s.mu.Lock()
 	clients := append([]*client(nil), s.clients...) // copy

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
@@ -24,9 +25,7 @@ type Engine struct {
 // map do not affect the Engine.
 func NewEngine(cells map[contracts.CellKind]contracts.Cell) *Engine {
 	cp := make(map[contracts.CellKind]contracts.Cell, len(cells))
-	for k, v := range cells {
-		cp[k] = v
-	}
+	maps.Copy(cp, cells)
 	return &Engine{cells: cp}
 }
 

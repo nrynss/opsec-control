@@ -37,20 +37,22 @@ func toFlatEvents(entries []timeline.Entry) []contracts.Event {
 
 // Server provides the HTTP API edge.
 // It only serializes contract types and forwards to the bus. No logic, no state.
+//
+// The orchestrator is intentionally NOT a dependency: fan-out is driven by the
+// reasoning loop in cmd/eoc, and the API only serves the latest COP via
+// COPProvider. Keeping the orchestrator out of the edge enforces "no logic" here.
 type Server struct {
 	store contracts.StateStore
 	bus   contracts.EventBus
-	orch  contracts.Orchestrator
 	log   EventLog
 	cop   COPProvider
 }
 
 // New creates the API server.
-func New(store contracts.StateStore, bus contracts.EventBus, orch contracts.Orchestrator, log EventLog, cop COPProvider) *Server {
+func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop COPProvider) *Server {
 	return &Server{
 		store: store,
 		bus:   bus,
-		orch:  orch,
 		log:   log,
 		cop:   cop,
 	}

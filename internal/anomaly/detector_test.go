@@ -1,6 +1,7 @@
 package anomaly
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
@@ -31,12 +32,7 @@ func makeBaseWorld() contracts.WorldState {
 }
 
 func contains(cells []contracts.CellKind, want contracts.CellKind) bool {
-	for _, c := range cells {
-		if c == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cells, want)
 }
 
 func TestClassify_Seismic(t *testing.T) {
@@ -139,6 +135,46 @@ func TestClassify_DamStressed(t *testing.T) {
 	got := d.Classify(ws, ev)
 	if !contains(got, contracts.CellInfrastructure) {
 		t.Error("dam stress should wake Infrastructure")
+	}
+}
+
+func TestClassify_BridgeCollapsed(t *testing.T) {
+	d := New()
+	ws := makeBaseWorld()
+	ws.Bridges["vora"] = contracts.Bridge{ID: "vora", Status: contracts.BridgeCollapsed}
+	ev := contracts.Event{Type: contracts.EventBridgeCollapsed, Confidence: 0.95}
+
+	got := d.Classify(ws, ev)
+	if !contains(got, contracts.CellInfrastructure) {
+		t.Error("bridge collapsed should wake Infrastructure")
+	}
+	if !contains(got, contracts.CellIntelligence) {
+		t.Error("bridge collapsed should wake Intelligence")
+	}
+}
+
+func TestClassify_PowerDegraded(t *testing.T) {
+	d := New()
+	ws := makeBaseWorld()
+	ev := contracts.Event{Type: contracts.EventPowerDegraded, Confidence: 0.9}
+
+	got := d.Classify(ws, ev)
+	if !contains(got, contracts.CellInfrastructure) {
+		t.Error("power degraded should wake Infrastructure")
+	}
+	if !contains(got, contracts.CellIntelligence) {
+		t.Error("power degraded should wake Intelligence")
+	}
+}
+
+func TestClassify_RoadBlocked(t *testing.T) {
+	d := New()
+	ws := makeBaseWorld()
+	ev := contracts.Event{Type: contracts.EventRoadBlocked, Confidence: 0.88}
+
+	got := d.Classify(ws, ev)
+	if !contains(got, contracts.CellInfrastructure) || !contains(got, contracts.CellIntelligence) {
+		t.Error("road blocked should wake Infrastructure and Intelligence")
 	}
 }
 

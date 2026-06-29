@@ -54,7 +54,7 @@ func (d *Detector) Classify(snapshot contracts.WorldState, event contracts.Event
 		wake[contracts.CellIntelligence] = struct{}{}
 
 	case contracts.EventBuildingCollapsed,
-		contracts.EventBridgeDamaged, contracts.EventBridgeClosed,
+		contracts.EventBridgeDamaged, contracts.EventBridgeClosed, contracts.EventBridgeCollapsed,
 		contracts.EventRoadBlocked, contracts.EventTunnelClosed:
 		wake[contracts.CellInfrastructure] = struct{}{}
 		wake[contracts.CellIntelligence] = struct{}{}
@@ -63,7 +63,7 @@ func (d *Detector) Classify(snapshot contracts.WorldState, event contracts.Event
 		wake[contracts.CellInfrastructure] = struct{}{}
 		wake[contracts.CellIntelligence] = struct{}{}
 
-	case contracts.EventPowerFailure, contracts.EventGasLeakDetected,
+	case contracts.EventPowerFailure, contracts.EventPowerDegraded, contracts.EventGasLeakDetected,
 		contracts.EventWaterMainBreak, contracts.EventCommsOutage:
 		wake[contracts.CellInfrastructure] = struct{}{}
 		wake[contracts.CellIntelligence] = struct{}{}

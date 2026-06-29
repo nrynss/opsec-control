@@ -19,6 +19,7 @@ func TestEnvelope(t *testing.T) {
 		{"no id", contracts.Event{Type: contracts.EventBridgeClosed, Confidence: 1}, contracts.RejectSchema},
 		{"unknown type", contracts.Event{ID: "x", Type: "Nope", Confidence: 1}, contracts.RejectSchema},
 		{"bad confidence", contracts.Event{ID: "x", Type: contracts.EventBridgeClosed, Confidence: 1.5}, contracts.RejectSchema},
+		{"negative timestamp", contracts.Event{ID: "x", Type: contracts.EventBridgeClosed, Confidence: 1, Timestamp: -1}, contracts.RejectRangeSanity},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -48,5 +49,38 @@ func TestLegalTransitions(t *testing.T) {
 	}
 	if LegalPower(contracts.PowerOff, contracts.PowerOff) {
 		t.Error("power off→off illegal")
+	}
+
+	// LegalRoad is bidirectional (§8.4)
+	if !LegalRoad(contracts.RoadOpen, contracts.RoadBlocked) {
+		t.Error("open→blocked should be legal for road")
+	}
+	if LegalRoad(contracts.RoadBlocked, contracts.RoadBlocked) {
+		t.Error("blocked→blocked must be illegal (no-op)")
+	}
+	if !LegalRoad(contracts.RoadBlocked, contracts.RoadOpen) {
+		t.Error("blocked→open must be legal (bidirectional)")
+	}
+	if !LegalRoad(contracts.RoadCongested, contracts.RoadBlocked) {
+		t.Error("congested→blocked legal")
+	}
+	// validate both sides (robustness)
+	if LegalRoad(contracts.RoadStatus("bogus"), contracts.RoadBlocked) {
+		t.Error("invalid from must be illegal")
+	}
+	if LegalRoad(contracts.RoadOpen, contracts.RoadStatus("bogus")) {
+		t.Error("invalid to must be illegal")
+	}
+}
+
+func TestKnownType_NewEvents(t *testing.T) {
+	for _, et := range []contracts.EventType{
+		contracts.EventBridgeCollapsed,
+		contracts.EventPowerDegraded,
+		contracts.EventRoadBlocked, // already present but exercise
+	} {
+		if !KnownType(et) {
+			t.Errorf("KnownType(%s) = false, want true", et)
+		}
 	}
 }

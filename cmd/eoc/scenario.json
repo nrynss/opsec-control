@@ -20,6 +20,10 @@
       "B-IRON": {"id": "B-IRON", "name": "Iron Bridge", "status": "open"},
       "B-SOUTH": {"id": "B-SOUTH", "name": "South Span", "status": "open"}
     },
+    "roads": {
+      "R-WEST-1": {"id": "R-WEST-1", "name": "Westbank Connector", "status": "open"},
+      "R-SOUTH-1": {"id": "R-SOUTH-1", "name": "Southport Access", "status": "open"}
+    },
     "dam": {"id": "D-MAINOR", "status": "normal", "reservoirPct": 0.75, "stressRating": 0.1},
     "levee": {"id": "L-SOUTHPORT", "status": "intact", "height": 5.0, "integrity": 0.9},
     "hospitals": {
@@ -48,6 +52,7 @@
     {"id": "evt-6", "timestamp": 50, "source": "hospital-feed", "type": "HospitalCapacityChanged", "confidence": 0.88, "payload": {"hospitalId": "H-CENTRAL", "occupancy": 470}},
     {"id": "evt-7", "timestamp": 70, "source": "Gemma4-Perception", "type": "AftershockOccurred", "confidence": 0.85, "payload": {"magnitude": 5.9}},
     {"id": "evt-8", "timestamp": 80, "source": "Gemma4-Perception", "type": "BridgeClosed", "confidence": 0.9, "payload": {"bridgeId": "B-SOUTH"}},
+    {"id": "evt-8b", "timestamp": 85, "source": "Gemma4-Perception", "type": "RoadBlocked", "confidence": 0.88, "payload": {"roadId": "R-WEST-1"}},
     {"id": "evt-9", "timestamp": 90, "source": "sensor-grid", "type": "FireIgnited", "confidence": 0.85, "payload": {"fireZoneId": "FZ-IRON", "sector": "S-IRONWORKS"}},
     {"id": "evt-10", "timestamp": 100, "source": "sensor-grid", "type": "GasLeakDetected", "confidence": 0.8, "payload": {"sector": "S-IRONWORKS"}},
     {"id": "evt-11", "timestamp": 110, "source": "dam-telemetry", "type": "DamStressElevated", "confidence": 0.82, "payload": {}},

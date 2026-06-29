@@ -8,9 +8,9 @@ import "github.com/nrynss/opsec-control/internal/contracts"
 
 var knownTypes = map[contracts.EventType]struct{}{
 	contracts.EventMainshockOccurred: {}, contracts.EventAftershockOccurred: {}, contracts.EventAftershockForecastUpdated: {},
-	contracts.EventBuildingCollapsed: {}, contracts.EventBridgeDamaged: {}, contracts.EventBridgeClosed: {},
+	contracts.EventBuildingCollapsed: {}, contracts.EventBridgeDamaged: {}, contracts.EventBridgeClosed: {}, contracts.EventBridgeCollapsed: {},
 	contracts.EventRoadBlocked: {}, contracts.EventTunnelClosed: {}, contracts.EventDamStressElevated: {}, contracts.EventLeveeBreached: {},
-	contracts.EventPowerFailure: {}, contracts.EventGasLeakDetected: {}, contracts.EventWaterMainBreak: {}, contracts.EventCommsOutage: {},
+	contracts.EventPowerFailure: {}, contracts.EventPowerDegraded: {}, contracts.EventGasLeakDetected: {}, contracts.EventWaterMainBreak: {}, contracts.EventCommsOutage: {},
 	contracts.EventFireIgnited: {}, contracts.EventFireSpread: {}, contracts.EventFireContained: {},
 	contracts.EventFloodExtentUpdated:    {},
 	contracts.EventCasualtyReportUpdated: {}, contracts.EventMassCasualtyIncident: {}, contracts.EventHospitalCapacityChanged: {},
@@ -32,6 +32,11 @@ func Envelope(ev contracts.Event) *contracts.RejectionError {
 		return &contracts.RejectionError{EventID: ev.ID, Reason: contracts.RejectSchema, Detail: "unknown event type"}
 	case ev.Confidence < 0 || ev.Confidence > 1:
 		return &contracts.RejectionError{EventID: ev.ID, Reason: contracts.RejectSchema, Detail: "confidence out of [0,1]"}
+	case ev.Timestamp < 0:
+		// SimTime is signed; t=0 is the scenario start (§8.5). A negative
+		// timestamp is out of range — reject it at the envelope so it never
+		// reaches the monotonicity check or sets world time negative.
+		return &contracts.RejectionError{EventID: ev.ID, Reason: contracts.RejectRangeSanity, Detail: "negative timestamp"}
 	}
 	return nil
 }
@@ -55,3 +60,20 @@ func LegalLevee(from, to contracts.LeveeStatus) bool     { return forward(leveeR
 func LegalPower(from, to contracts.PowerStatus) bool     { return forward(powerRank, from, to) }
 func LegalUtility(from, to contracts.UtilityStatus) bool { return forward(utilityRank, from, to) }
 func LegalFire(from, to contracts.FireStatus) bool       { return forward(fireRank, from, to) }
+
+// Road is bidirectional per SPEC §8.4 (open ↔ congested ↔ blocked).
+// LegalRoad allows any transition between *distinct* valid states; no-op is rejected
+// for consistency with other "must actually change" rules.
+// Both 'from' and 'to' are validated for robustness (symmetry); in practice 'from'
+// comes from tracked state but callers should not be able to sneak in invalid values.
+func LegalRoad(from, to contracts.RoadStatus) bool {
+	return from != to && validRoad(from) && validRoad(to)
+}
+
+func validRoad(s contracts.RoadStatus) bool {
+	switch s {
+	case contracts.RoadOpen, contracts.RoadCongested, contracts.RoadBlocked:
+		return true
+	}
+	return false
+}

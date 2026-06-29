@@ -288,9 +288,9 @@ func TestRealClientFallbackDuration(t *testing.T) {
 func TestRetryOnTransientErrors(t *testing.T) {
 	os.Unsetenv("LLM_MOCK")
 
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			w.Write([]byte("Rate limited"))
@@ -335,7 +335,7 @@ func TestRetryOnTransientErrors(t *testing.T) {
 		t.Errorf("expected success content, got: %s", resp.Content)
 	}
 
-	finalAttempts := atomic.LoadInt32(&attempts)
+	finalAttempts := attempts.Load()
 	if finalAttempts != 3 {
 		t.Errorf("expected 3 total attempts, got %d", finalAttempts)
 	}
@@ -344,9 +344,9 @@ func TestRetryOnTransientErrors(t *testing.T) {
 func TestRetryAfterHeader(t *testing.T) {
 	os.Unsetenv("LLM_MOCK")
 
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count == 1 {
 			w.Header().Set("Retry-After", "1") // 1 second
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -393,9 +393,9 @@ func TestRetryAfterHeader(t *testing.T) {
 func TestRetryAfterHTTPDate(t *testing.T) {
 	os.Unsetenv("LLM_MOCK")
 
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count == 1 {
 			futureStr := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
 			w.Header().Set("Retry-After", futureStr)
@@ -443,9 +443,9 @@ func TestRetryAfterHTTPDate(t *testing.T) {
 func TestTerminal4xxNoRetry(t *testing.T) {
 	os.Unsetenv("LLM_MOCK")
 
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusUnprocessableEntity) // 422 Unprocessable Entity
 		w.Write([]byte("Terminal error detail"))
 	}))
@@ -463,8 +463,8 @@ func TestTerminal4xxNoRetry(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if atomic.LoadInt32(&attempts) != 1 {
-		t.Errorf("expected only 1 attempt for terminal 4xx, got %d", atomic.LoadInt32(&attempts))
+	if attempts.Load() != 1 {
+		t.Errorf("expected only 1 attempt for terminal 4xx, got %d", attempts.Load())
 	}
 
 	if !strings.Contains(err.Error(), "Terminal error detail") {
@@ -475,22 +475,22 @@ func TestTerminal4xxNoRetry(t *testing.T) {
 func TestConcurrencyCap(t *testing.T) {
 	os.Unsetenv("LLM_MOCK")
 
-	var activeRequests int32
-	var maxActiveRequests int32
+	var activeRequests atomic.Int32
+	var maxActiveRequests atomic.Int32
 	var hasExceeded atomic.Bool
 
 	maxConcurrency := 3
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		currentActive := atomic.AddInt32(&activeRequests, 1)
-		defer atomic.AddInt32(&activeRequests, -1)
+		currentActive := activeRequests.Add(1)
+		defer activeRequests.Add(-1)
 
 		for {
-			max := atomic.LoadInt32(&maxActiveRequests)
+			max := maxActiveRequests.Load()
 			if currentActive <= max {
 				break
 			}
-			if atomic.CompareAndSwapInt32(&maxActiveRequests, max, currentActive) {
+			if maxActiveRequests.CompareAndSwap(max, currentActive) {
 				break
 			}
 		}
@@ -527,21 +527,71 @@ func TestConcurrencyCap(t *testing.T) {
 	totalCalls := 10
 	errChan := make(chan error, totalCalls)
 
-	for i := 0; i < totalCalls; i++ {
+	for range totalCalls {
 		go func() {
 			_, err := client.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
 			errChan <- err
 		}()
 	}
 
-	for i := 0; i < totalCalls; i++ {
+	for range totalCalls {
 		if err := <-errChan; err != nil {
 			t.Errorf("concurrent call failed: %v", err)
 		}
 	}
 
 	if hasExceeded.Load() {
-		t.Errorf("max concurrent requests exceeded limit of %d, got max active %d", maxConcurrency, atomic.LoadInt32(&maxActiveRequests))
+		t.Errorf("max concurrent requests exceeded limit of %d, got max active %d", maxConcurrency, maxActiveRequests.Load())
+	}
+}
+
+func TestBackoffDeterministic(t *testing.T) {
+	// Determinism is law (SPEC §0.2 r5): the backoff PRNG must never be seeded
+	// from the wall clock. Two clients with equal config (including the default
+	// seed) must produce identical jitter sequences.
+	newSeq := func(seed int64) []time.Duration {
+		c := NewClient(Config{APIKey: "k", Seed: seed})
+		out := make([]time.Duration, 0, 5)
+		for attempt := range 5 {
+			out = append(out, c.getBackoff(attempt, ""))
+		}
+		return out
+	}
+
+	a, b := newSeq(0), newSeq(0)
+	for i := range a {
+		if a[i] != b[i] {
+			t.Fatalf("default-seed backoff not reproducible at attempt %d: %v != %v", i, a[i], b[i])
+		}
+	}
+
+	// An explicit seed is honored and (with overwhelming probability) yields a
+	// different sequence than the default — confirming the seed is actually used.
+	c := newSeq(99)
+	differs := false
+	for i := range a {
+		if a[i] != c[i] {
+			differs = true
+			break
+		}
+	}
+	if !differs {
+		t.Fatal("explicit seed produced an identical sequence to the default; Config.Seed not applied")
+	}
+}
+
+func TestMockHonorsContextCancellation(t *testing.T) {
+	os.Setenv("LLM_MOCK", "true")
+	defer os.Unsetenv("LLM_MOCK")
+
+	client := NewClient(Config{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled before the call — mock must not sleep out its latency
+
+	_, err := client.Complete(ctx, contracts.LLMRequest{System: "commander", User: "synthesize"})
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled from a cancelled mock completion, got: %v", err)
 	}
 }
 

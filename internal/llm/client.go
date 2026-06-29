@@ -43,6 +43,11 @@ type Config struct {
 	MaxRetries     int
 	Backoff        time.Duration
 	MaxConcurrency int
+	// Seed seeds the backoff-jitter PRNG. Determinism is law (SPEC §0.2 r5):
+	// the client never reads the wall clock to seed rand. When 0, a fixed
+	// default seed is used; callers wanting reproducible-yet-varied jitter can
+	// derive this from the scenario seed.
+	Seed int64
 }
 
 // NewClient creates a new Cerebras LLM client.
@@ -95,7 +100,15 @@ func NewClient(cfg Config) *Client {
 	}
 
 	sem := make(chan struct{}, maxConcurrency)
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// Determinism (SPEC §0.2 r5): seed from Config, never the wall clock. A
+	// fixed default keeps backoff jitter reproducible across runs; jitter only
+	// affects retry timing, never state or event output.
+	seed := cfg.Seed
+	if seed == 0 {
+		seed = 1
+	}
+	r := rand.New(rand.NewSource(seed))
 
 	return &Client{
 		apiKey:         apiKey,
@@ -114,7 +127,7 @@ func NewClient(cfg Config) *Client {
 func (c *Client) Complete(ctx context.Context, req contracts.LLMRequest) (contracts.LLMResponse, error) {
 	// Trigger Mock Mode if requested or if no API key is configured
 	if os.Getenv("LLM_MOCK") == "true" || c.apiKey == "" {
-		return c.completeMock(req)
+		return c.completeMock(ctx, req)
 	}
 
 	return c.completeReal(ctx, req)
@@ -274,7 +287,7 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 
 	totalAttempts := c.maxRetries + 1
 
-	for attempt := 0; attempt < totalAttempts; attempt++ {
+	for attempt := range totalAttempts {
 		if err := ctx.Err(); err != nil {
 			return contracts.LLMResponse{}, err
 		}
@@ -397,7 +410,12 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 
 // completeMock simulates the Cerebras completion API by returning high-fidelity mock JSON responses
 // tailored to the respective EOC specialist and commander cells.
-func (c *Client) completeMock(req contracts.LLMRequest) (contracts.LLMResponse, error) {
+//
+// It honors ctx cancellation during the simulated inference latency: if the
+// orchestrator's fan-out is cancelled (e.g. a timeout), the mock returns
+// promptly rather than sleeping out the full delay, so a cancelled fan-out
+// frees the concurrency budget immediately — matching the real client.
+func (c *Client) completeMock(ctx context.Context, req contracts.LLMRequest) (contracts.LLMResponse, error) {
 	// Parse stateVersion if passed in user prompt to stay in lockstep
 	stateVersion := uint64(1)
 	versionRegex := regexp.MustCompile(`"stateVersion":\s*(\d+)`)
@@ -537,7 +555,11 @@ func (c *Client) completeMock(req contracts.LLMRequest) (contracts.LLMResponse, 
 
 	// Simulating duration based on tokens generated at 1500 tokens/sec
 	simulatedDuration := time.Duration(float64(tokensOut)/tokensPerSec*1000) * time.Millisecond
-	time.Sleep(simulatedDuration)
+	select {
+	case <-ctx.Done():
+		return contracts.LLMResponse{}, ctx.Err()
+	case <-time.After(simulatedDuration):
+	}
 
 	return contracts.LLMResponse{
 		Content:      content,

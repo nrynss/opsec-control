@@ -138,7 +138,7 @@ func TestConcurrentAppendAndQuery(t *testing.T) {
 
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			ev := contracts.Event{ID: "evt-", Timestamp: contracts.SimTime(i)}
 			tl.Append(ev)
 		}
@@ -147,7 +147,7 @@ func TestConcurrentAppendAndQuery(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			_ = tl.Len()
 			_ = tl.All()
 			_ = tl.Since(contracts.SimTime(i))

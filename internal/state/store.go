@@ -39,6 +39,9 @@ func New(initial contracts.WorldState) *Store {
 	if initial.Resources == nil {
 		initial.Resources = map[contracts.ResourceID]contracts.Resource{}
 	}
+	if initial.Roads == nil {
+		initial.Roads = map[contracts.RoadID]contracts.Road{}
+	}
 	return &Store{ws: initial, seen: map[contracts.EventID]struct{}{}}
 }
 
@@ -98,6 +101,9 @@ type (
 	bridgeRef struct {
 		BridgeID contracts.BridgeID `json:"bridgeId"`
 	}
+	roadRef struct {
+		RoadID contracts.RoadID `json:"roadId"`
+	}
 	sectorRef struct {
 		Sector contracts.SectorID `json:"sector"`
 	}
@@ -132,9 +138,21 @@ var fireTo = map[contracts.EventType]contracts.FireStatus{
 // Events with no tracked state effect (seismic, perception, citizen reports,
 // evacuations, casualties) are accepted without mutation; they still bump the
 // version via Apply (§8).
+//
+// Per BUG-4/5 resolution (B1): EventBuildingCollapsed and EventTunnelClosed are
+// *deliberate trigger-only* signals. They wake anomaly-driven cells (Intelligence +
+// Infrastructure) via the classifier but carry no entity in the MVD WorldState
+// (SPEC §8.4 defines neither a Building nor Tunnel entity; §8.5 mentions collapses
+// narratively only). They are accepted (version/time advance) with no state change.
+//
+// Note: payloads for trigger-only events are not parsed or validated for
+// referential integrity (no entity exists to check against). E.g. a
+// BuildingCollapsed with a typo'd or nonexistent "sector" is accepted. This is
+// correct-by-design for B1. See TestApply_TriggerOnlyEvents_B1. Road/Bridge/Power
+// use real entities with full §14.2 checks.
 func (s *Store) mutate(ev contracts.Event) *contracts.RejectionError {
 	switch ev.Type {
-	case contracts.EventBridgeDamaged, contracts.EventBridgeClosed:
+	case contracts.EventBridgeDamaged, contracts.EventBridgeClosed, contracts.EventBridgeCollapsed:
 		p, ok := parse[bridgeRef](ev.Payload)
 		if !ok {
 			return rej(ev, contracts.RejectSchema, "bad bridge payload")
@@ -144,14 +162,32 @@ func (s *Store) mutate(ev contracts.Event) *contracts.RejectionError {
 			return rej(ev, contracts.RejectReferentialIntegrity, "unknown bridge")
 		}
 		to := contracts.BridgeRestricted
-		if ev.Type == contracts.EventBridgeClosed {
+		switch ev.Type {
+		case contracts.EventBridgeClosed:
 			to = contracts.BridgeClosed
+		case contracts.EventBridgeCollapsed:
+			to = contracts.BridgeCollapsed
 		}
 		if !validation.LegalBridge(b.Status, to) {
 			return rej(ev, contracts.RejectIllegalTransition, "bridge")
 		}
 		b.Status = to
 		s.ws.Bridges[p.BridgeID] = b
+
+	case contracts.EventRoadBlocked:
+		p, ok := parse[roadRef](ev.Payload)
+		if !ok || p.RoadID == "" {
+			return rej(ev, contracts.RejectSchema, "bad road payload")
+		}
+		r, ok := s.ws.Roads[p.RoadID]
+		if !ok {
+			return rej(ev, contracts.RejectReferentialIntegrity, "unknown road")
+		}
+		if !validation.LegalRoad(r.Status, contracts.RoadBlocked) {
+			return rej(ev, contracts.RejectIllegalTransition, "road")
+		}
+		r.Status = contracts.RoadBlocked
+		s.ws.Roads[p.RoadID] = r
 
 	case contracts.EventPowerFailure:
 		sec, re := s.sector(ev)
@@ -164,15 +200,27 @@ func (s *Store) mutate(ev contracts.Event) *contracts.RejectionError {
 		sec.Power = contracts.PowerOff
 		s.ws.Sectors[sec.ID] = sec
 
+	case contracts.EventPowerDegraded:
+		sec, re := s.sector(ev)
+		if re != nil {
+			return re
+		}
+		if !validation.LegalPower(sec.Power, contracts.PowerPartial) {
+			return rej(ev, contracts.RejectIllegalTransition, "power")
+		}
+		sec.Power = contracts.PowerPartial
+		s.ws.Sectors[sec.ID] = sec
+
 	case contracts.EventGasLeakDetected, contracts.EventWaterMainBreak, contracts.EventCommsOutage:
 		sec, re := s.sector(ev)
 		if re != nil {
 			return re
 		}
 		cur := sec.Gas
-		if ev.Type == contracts.EventWaterMainBreak {
+		switch ev.Type {
+		case contracts.EventWaterMainBreak:
 			cur = sec.Water
-		} else if ev.Type == contracts.EventCommsOutage {
+		case contracts.EventCommsOutage:
 			cur = sec.Comms
 		}
 		if !validation.LegalUtility(cur, contracts.UtilityDown) {
@@ -332,6 +380,7 @@ func clone(ws contracts.WorldState) contracts.WorldState {
 	ws.Shelters = copyMap(ws.Shelters)
 	ws.FireZones = copyMap(ws.FireZones)
 	ws.Resources = copyMap(ws.Resources)
+	ws.Roads = copyMap(ws.Roads)
 	pg := make([]contracts.FloodPolygon, len(ws.Flood.Polygons))
 	copy(pg, ws.Flood.Polygons)
 	for i := range pg {

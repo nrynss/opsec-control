@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,20 +27,12 @@ func (m *mockBus) Subscribe() (<-chan contracts.Event, func()) {
 	return ch, func() { close(ch) }
 }
 
-// mockOrch .
-type mockOrch struct{}
-
-func (m *mockOrch) FanOut(ctx context.Context, snapshot contracts.WorldState, trigger contracts.Event, wake []contracts.CellKind) (contracts.CommonOperationalPicture, error) {
-	return contracts.CommonOperationalPicture{}, nil
-}
-
 func TestRegisterAndState(t *testing.T) {
 	store := &mockStore{ws: contracts.WorldState{Version: 42}}
 	bus := &mockBus{}
-	orch := &mockOrch{}
 	log := &mockLog{}
 
-	srv := New(store, bus, orch, log, nil)
+	srv := New(store, bus, log, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
