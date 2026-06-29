@@ -235,6 +235,37 @@ func TestApply_TriggerOnlyEvents_B1(t *testing.T) {
 	}
 }
 
+func TestApply_Reset(t *testing.T) {
+	initWS := initial()
+	s := New(initWS)
+	// mutate state
+	_, _ = s.Apply(ev("e1", 10, contracts.EventBridgeClosed, map[string]string{"bridgeId": "vora"}))
+	if s.Version() != 1 {
+		t.Fatalf("version=%d, want 1", s.Version())
+	}
+	if s.Snapshot().Bridges["vora"].Status != contracts.BridgeClosed {
+		t.Fatalf("bridge status=%s, want closed", s.Snapshot().Bridges["vora"].Status)
+	}
+
+	// reset
+	s.Reset(initWS)
+	if s.Version() != 0 {
+		t.Fatalf("after reset version=%d, want 0", s.Version())
+	}
+	if s.Snapshot().Bridges["vora"].Status != contracts.BridgeOpen {
+		t.Fatalf("after reset bridge status=%s, want open", s.Snapshot().Bridges["vora"].Status)
+	}
+
+	// check duplicate map reset: e1 should be acceptable again
+	v, err := s.Apply(ev("e1", 10, contracts.EventBridgeClosed, map[string]string{"bridgeId": "vora"}))
+	if err != nil {
+		t.Fatalf("after reset apply e1 failed: %v", err)
+	}
+	if v != 1 {
+		t.Fatalf("after reset version=%d, want 1", v)
+	}
+}
+
 // versionsAdvanced checks that version bumped by delta and time set to ts.
 func versionsAdvanced(before, after contracts.WorldState, verDelta int, ts contracts.SimTime) bool {
 	return after.Version == before.Version+contracts.StateVersion(verDelta) && after.Time == ts

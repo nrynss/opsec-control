@@ -21,6 +21,7 @@ type Store struct {
 // New builds a Store from the scenario's t=0 substrate. Maps are ensured
 // non-nil so mutation is safe.
 func New(initial contracts.WorldState) *Store {
+	initial = clone(initial)
 	if initial.Sectors == nil {
 		initial.Sectors = map[contracts.SectorID]contracts.Sector{}
 	}
@@ -57,6 +58,17 @@ func (s *Store) Snapshot() contracts.WorldState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return clone(s.ws)
+}
+
+// Reset reloads the simulation substrate to t=0 and clears the event deduplication
+// map. This is the single sanctioned exception to the single-mutator rule.
+func (s *Store) Reset(initial contracts.WorldState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ws = clone(initial)
+	s.seen = make(map[contracts.EventID]struct{})
+	s.ws.Version = 0
+	s.ws.Time = 0
 }
 
 // Apply runs the §14.2 contract and, if accepted, mutates state and returns the
@@ -374,13 +386,14 @@ func hospitalBand(occ, beds int) contracts.HospitalBand {
 }
 
 func clone(ws contracts.WorldState) contracts.WorldState {
-	ws.Sectors = copyMap(ws.Sectors)
-	ws.Bridges = copyMap(ws.Bridges)
-	ws.Hospitals = copyMap(ws.Hospitals)
-	ws.Shelters = copyMap(ws.Shelters)
-	ws.FireZones = copyMap(ws.FireZones)
-	ws.Resources = copyMap(ws.Resources)
-	ws.Roads = copyMap(ws.Roads)
+	out := ws
+	out.Sectors = copyMap(ws.Sectors)
+	out.Bridges = copyMap(ws.Bridges)
+	out.Hospitals = copyMap(ws.Hospitals)
+	out.Shelters = copyMap(ws.Shelters)
+	out.FireZones = copyMap(ws.FireZones)
+	out.Resources = copyMap(ws.Resources)
+	out.Roads = copyMap(ws.Roads)
 	pg := make([]contracts.FloodPolygon, len(ws.Flood.Polygons))
 	copy(pg, ws.Flood.Polygons)
 	for i := range pg {
@@ -388,8 +401,8 @@ func clone(ws contracts.WorldState) contracts.WorldState {
 		copy(pts, pg[i].Points)
 		pg[i].Points = pts
 	}
-	ws.Flood.Polygons = pg
-	return ws
+	out.Flood.Polygons = pg
+	return out
 }
 
 func copyMap[K comparable, V any](m map[K]V) map[K]V {
