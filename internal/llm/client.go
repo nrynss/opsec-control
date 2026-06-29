@@ -168,7 +168,7 @@ func NewClient(cfg Config) *Client {
 	}
 	r := rand.New(rand.NewSource(seed))
 
-	// Resolve the active provider's key for mock-mode detection (Complete checks c.apiKey).
+	// Determine the active key for the initial active-provider fields.
 	activeKey := cerebrasKey
 	if cfg.Provider == ProviderOpenRouter {
 		activeKey = openrouterKey
@@ -236,10 +236,22 @@ func (c *Client) SetProvider(p Provider) {
 	}
 }
 
-// Complete executes a prompt completion against Cerebras (or runs Mock Mode if no key is present or LLM_MOCK=true).
+// configSnapshot returns the active provider and its apiKey, baseURL, model
+// atomically, safe for concurrent use with SetProvider.
+func (c *Client) configSnapshot() (provider Provider, apiKey, baseURL, model string) {
+	c.providerMu.RLock()
+	defer c.providerMu.RUnlock()
+	return c.provider, c.apiKey, c.baseURL, c.model
+}
+
+// Complete executes a prompt completion against the active provider (or runs Mock
+// Mode if LLM_MOCK=true or no API key is configured). Safe for concurrent use with
+// SetProvider — the active config is snapshotted atomically at entry.
 func (c *Client) Complete(ctx context.Context, req contracts.LLMRequest) (contracts.LLMResponse, error) {
-	// Trigger Mock Mode if requested or if no API key is configured
-	if os.Getenv("LLM_MOCK") == "true" || c.apiKey == "" {
+	// Mock mode: LLM_MOCK=true or no API key for the active provider.
+	// Snapshot avoids a data race with SetProvider.
+	_, apiKey, _, _ := c.configSnapshot()
+	if os.Getenv("LLM_MOCK") == "true" || apiKey == "" {
 		return c.completeMock(ctx, req)
 	}
 
@@ -364,6 +376,10 @@ func parseRetryAfter(header string, now time.Time) (time.Duration, bool) {
 }
 
 func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (contracts.LLMResponse, error) {
+	// Snapshot active provider config atomically to avoid data races with
+	// concurrent SetProvider calls.
+	provider, apiKey, baseURL, model := c.configSnapshot()
+
 	methodStartTime := time.Now()
 	messages := make([]chatMessage, 0, 2)
 	if req.System != "" {
@@ -372,11 +388,14 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 	messages = append(messages, chatMessage{Role: "user", Content: req.User})
 
 	apiReqPayload := chatCompletionRequest{
-		Model:    c.model,
+		Model:    model,
 		Messages: messages,
 	}
 
-	if len(req.Schema) > 0 {
+	// response_format with json_schema + strict is Cerebras-specific.
+	// OpenRouter proxies many models — some don't support it. Drop response_format
+	// for OpenRouter and rely on the system prompt to request JSON output.
+	if len(req.Schema) > 0 && provider == ProviderCerebras {
 		cleanedSchema := ensureAdditionalPropertiesFalse(req.Schema)
 		apiReqPayload.ResponseFormat = &responseFormat{
 			Type: "json_schema",
@@ -393,7 +412,8 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 		return contracts.LLMResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(c.baseURL, "/"))
+	// Build url from the snapshotted provider config (avoids data race with SetProvider).
+	url := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(baseURL, "/"))
 
 	var httpResp *http.Response
 	var bodyBytes []byte
@@ -421,7 +441,7 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 		}
 
 		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
 		startTime := time.Now()
 		httpResp, err = c.client.Do(httpReq)

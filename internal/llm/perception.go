@@ -20,7 +20,10 @@ import (
 // images to detect disaster anomalies and returns structured EOC events.
 func (c *Client) Interpret(ctx context.Context, input contracts.ImageInput) ([]contracts.Event, error) {
 	// If LLM_MOCK is true or API Key is missing, run high-fidelity mock perception
-	if os.Getenv("LLM_MOCK") == "true" || c.apiKey == "" {
+	// Mock mode: LLM_MOCK=true or no API key for the active provider.
+	// Snapshot avoids a data race with SetProvider.
+	_, activeKey, _, _ := c.configSnapshot()
+	if os.Getenv("LLM_MOCK") == "true" || activeKey == "" {
 		return c.interpretMock(ctx, input)
 	}
 
@@ -97,8 +100,9 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) ([]contracts.Event, error) {
 	systemPrompt := "You are an EOC Multimodal Perception Agent. Analyze the aerial drone/satellite image and identify any structural collapses, bridge blockages, fires, or flooding. Output a JSON array of events."
 
-	// Active provider's model (resolved by SetProvider / NewClient).
-	visionModel := c.model
+	// Snapshot active provider config atomically to avoid data races with
+	// concurrent SetProvider calls.
+	provider, apiKey, baseURL, visionModel := c.configSnapshot()
 
 	// Base64 encode the image data
 	base64Data := base64.StdEncoding.EncodeToString(input.Data)
@@ -140,9 +144,8 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 		ResponseFormat *responseFormat `json:"response_format,omitempty"`
 	}
 
-	cleanedSchema := ensureAdditionalPropertiesFalse(schema)
 	apiReqPayload := visionRequest{
-		Model: visionModel,
+		Model:    visionModel,
 		Messages: []visionMessage{
 			{
 				Role: "user",
@@ -157,14 +160,20 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 				},
 			},
 		},
-		ResponseFormat: &responseFormat{
+	}
+
+	// response_format with json_schema + strict is Cerebras-specific.
+	// OpenRouter proxies many models — some don't support it.
+	if provider == ProviderCerebras {
+		cleanedSchema := ensureAdditionalPropertiesFalse(schema)
+		apiReqPayload.ResponseFormat = &responseFormat{
 			Type: "json_schema",
 			JSONSchema: &responseFormatSchema{
 				Name:   "perception_output",
 				Strict: true,
 				Schema: cleanedSchema,
 			},
-		},
+		}
 	}
 
 	reqBytes, err := json.Marshal(apiReqPayload)
@@ -172,7 +181,7 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(c.baseURL, "/"))
+	url := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(baseURL, "/"))
 
 	// Acquire semaphore
 	select {
@@ -188,7 +197,7 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
 	httpResp, err := c.client.Do(httpReq)
 	if err != nil {
