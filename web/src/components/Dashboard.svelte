@@ -84,6 +84,7 @@
   };
   var demoWallStart = null;
   var demoAccumulatedWallTime = 0;
+  var lastResetTime = 0;
 
   // Initialize EOC default nominal state
   function loadNominalState() {
@@ -193,6 +194,10 @@
         if (res.ok) {
           var data = await res.json();
           if (data && data.status !== "not_wired") {
+            if (Date.now() - lastResetTime < 800) {
+              // ignore potentially stale stats right after reset
+              return;
+            }
             stats = data;
             // Sync isPlaying with stats status
             if (stats.status === "running") {
@@ -326,6 +331,11 @@
 
     // P25: WS reset broadcast handling
     if (kind === "reset") {
+      if (Date.now() - lastResetTime < 1500) {
+        // already handled optimistically in handleReset
+        addLog("SYSTEM", "All Clear reset received. Feeds and clock cleared.");
+        return;
+      }
       loadNominalState();
       addLog("SYSTEM", "All Clear reset received. Feeds and clock cleared.");
       return;
@@ -474,6 +484,7 @@
       // backend reset + WS broadcast will confirm/sync
       isPlaying = false;
       speed = 1.0;
+      lastResetTime = Date.now();
       loadNominalState();
     }
   }

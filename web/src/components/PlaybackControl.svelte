@@ -25,7 +25,7 @@
     observedMax = Math.max(observedMax, activeEvent.timestamp);
   }
 
-  $: endBound = demoMode ? 60 : Math.max(170, currentTime, observedMax);
+  $: endBound = demoMode ? 60 : Math.max(170, observedMax || 0);
   $: progressPct = endBound > 0 ? Math.min(100, Math.max(0, (currentTime / endBound) * 100)) : 0;
 
   $: isPaused = !isPlaying;
