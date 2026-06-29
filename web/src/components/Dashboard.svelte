@@ -85,6 +85,7 @@
   var demoWallStart = null;
   var demoAccumulatedWallTime = 0;
   var lastResetTime = 0;
+  var pendingReset = false;
 
   // Initialize EOC default nominal state
   function loadNominalState() {
@@ -194,11 +195,12 @@
         if (res.ok) {
           var data = await res.json();
           if (data && data.status !== "not_wired") {
-            if (Date.now() - lastResetTime < 800) {
+            if (pendingReset || (Date.now() - lastResetTime < 800)) {
               // ignore potentially stale stats right after reset
               return;
             }
             stats = data;
+            if (pendingReset) pendingReset = false;
             // Sync isPlaying with stats status
             if (stats.status === "running") {
               isPlaying = true;
@@ -288,6 +290,8 @@
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
         demoMode = false;
+        pendingReset = false;
+        lastResetTime = 0;
         if (demoTimer) {
           clearInterval(demoTimer);
           demoTimer = null;
@@ -331,8 +335,12 @@
 
     // P25: WS reset broadcast handling
     if (kind === "reset") {
+      if (pendingReset) {
+        pendingReset = false;
+        addLog("SYSTEM", "All Clear reset received. Feeds and clock cleared.");
+        return;
+      }
       if (Date.now() - lastResetTime < 1500) {
-        // already handled optimistically in handleReset
         addLog("SYSTEM", "All Clear reset received. Feeds and clock cleared.");
         return;
       }
@@ -436,6 +444,8 @@
 
   function startDemoMode() {
     demoMode = true;
+    pendingReset = false;
+    lastResetTime = 0;
     isPlaying = true;
     speed = 1.0;
     loadNominalState();
@@ -485,6 +495,7 @@
       isPlaying = false;
       speed = 1.0;
       lastResetTime = Date.now();
+      pendingReset = true;
       loadNominalState();
     }
   }
