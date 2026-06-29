@@ -627,21 +627,8 @@
     </div>
   </div>
 
-  <!-- Center Main Area: Tactical Map and Specialists grid -->
+  <!-- Center Main Area: Commander Cell (top), Map (middle), Specialists grid (bottom) -->
   <div class="main-area">
-    <!-- SV Map -->
-    <Map {state} activeEvent={timelineEvents[timelineEvents.length - 1]} />
-
-    <!-- Specialists Grid -->
-    <div class="specialists-panel">
-      {#each Object.keys(cellStatuses) as name}
-        <CellPanel kind={name} history={cellHistory[name]} status={cellStatuses[name]} />
-      {/each}
-    </div>
-  </div>
-
-  <!-- Right Sidebar: Commander Synthesis & JSON Matrix Stream -->
-  <div class="right-sidebar">
     <!-- Commander panel -->
     <div class="commander-panel" style="display: flex; flex-direction: column;">
       <div class="commander-header">
@@ -683,13 +670,26 @@
           </div>
         {/each}
         {#if copHistory.length <= 1}
-          <div style="font-size: 0.7rem; color: var(--text-muted); font-style: italic; text-align: center; margin-top: 10px;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-style: italic; text-align: center; margin-top: 10px;">
             No prior COP history.
           </div>
         {/if}
       </div>
     </div>
 
+    <!-- SV Map -->
+    <Map {state} activeEvent={timelineEvents[timelineEvents.length - 1]} />
+
+    <!-- Specialists Grid -->
+    <div class="specialists-panel">
+      {#each Object.keys(cellStatuses) as name}
+        <CellPanel kind={name} history={cellHistory[name]} status={cellStatuses[name]} />
+      {/each}
+    </div>
+  </div>
+
+  <!-- Right Sidebar: JSON Matrix Stream -->
+  <div class="right-sidebar">
     <!-- Matrix Stream Feed -->
     <MatrixFeed logs={matrixLogs} {currentProvider} />
   </div>

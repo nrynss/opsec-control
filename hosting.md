@@ -151,6 +151,7 @@ The server runs **one LLM client** that can speak to either **Cerebras** or
   `POST /provider`, and logs/labels reflect the active provider.
 - Switching to a provider whose key is **unconfigured** drops that provider into
   **mock mode** — set both keys if you want to demo a live A/B between them.
+- The UI features a manual multi-select image upload interface (replacing the Drone/Satellite toggles) that uploads selected pictures sequentially to `/perception` and reports the aggregate results.
 
 ---
 

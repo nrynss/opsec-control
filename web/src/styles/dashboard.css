@@ -102,6 +102,33 @@ body {
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.05rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pulse-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.demo-dot {
+  background: var(--color-high);
+  box-shadow: 0 0 8px var(--color-high);
+  animation: pulse-dot-anim 1s infinite alternate;
+}
+
+.live-dot {
+  background: var(--color-nominal);
+  box-shadow: 0 0 8px var(--color-nominal);
+  animation: pulse-dot-anim 1s infinite alternate;
+}
+
+@keyframes pulse-dot-anim {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
 }
 
 .hud-badge.demo {
@@ -277,7 +304,7 @@ body {
 .main-area {
   grid-area: main;
   display: grid;
-  grid-template-rows: 360px 1fr;
+  grid-template-rows: auto 180px 1fr;
   gap: 12px;
   height: calc(100vh - 96px);
 }
@@ -479,7 +506,7 @@ body {
 .right-sidebar {
   grid-area: sidebar;
   display: grid;
-  grid-template-rows: 280px 1fr;
+  grid-template-rows: 1fr;
   gap: 12px;
   height: calc(100vh - 96px);
 }

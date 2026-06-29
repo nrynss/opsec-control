@@ -27,12 +27,18 @@
 </script>
 
 <div class="hud-strip">
-  <div class="hud-logo" style="display: flex; align-items: center;">
-    <span>CEREBRO EOC</span>
+  <div class="hud-logo" style="display: flex; align-items: center; gap: 8px;">
+    <span style="font-weight: 800; letter-spacing: 0.05rem;">CEREBRO EOC</span>
     {#if demoMode}
-      <span class="hud-badge demo">Offline / Demo</span>
+      <span class="hud-badge demo" title="Running in simulated offline/demo mode loop">
+        <span class="pulse-dot demo-dot"></span>
+        OFFLINE / DEMO
+      </span>
     {:else}
-      <span class="hud-badge live">Live / Connected</span>
+      <span class="hud-badge live" title="Connected to EOC live websocket feed">
+        <span class="pulse-dot live-dot"></span>
+        LIVE / CONNECTED
+      </span>
     {/if}
   </div>
 

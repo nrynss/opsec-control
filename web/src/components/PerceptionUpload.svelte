@@ -4,7 +4,6 @@
   
   var dispatch = createEventDispatcher();
   
-  var selectedSource = "drone";
   var dragActive = false;
   var uploadState = "idle"; // "idle", "uploading", "analyzing", "success", "error"
   var statusMessage = "";
@@ -33,14 +32,14 @@
     e.stopPropagation();
     dragActive = false;
     
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFiles(Array.from(e.dataTransfer.files));
     }
   }
 
   function handleFileSelect(e) {
-    if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      processFiles(Array.from(e.target.files));
     }
   }
 
@@ -48,54 +47,71 @@
     fileInput.click();
   }
 
-  // Create local preview thumbnail for snazzy UX
-  function processFile(file) {
-    if (file.size > 10 * 1024 * 1024) {
-      uploadState = "error";
-      statusMessage = "Payload too large (max 10MB)";
-      thumbnail = null;
-      dispatch('error', statusMessage);
-      return;
+  // Create local preview thumbnail for snazzy UX (using the first file)
+  function processFiles(files) {
+    for (var file of files) {
+      if (file.size > 10 * 1024 * 1024) {
+        uploadState = "error";
+        statusMessage = `File "${file.name}" is too large (max 10MB)`;
+        thumbnail = null;
+        dispatch('error', statusMessage);
+        return;
+      }
     }
 
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      thumbnail = e.target.result;
-    };
-    reader.readAsDataURL(file);
+    if (files.length > 0) {
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        thumbnail = e.target.result;
+      };
+      reader.readAsDataURL(files[0]);
+    }
     
-    uploadImage(file);
+    uploadImages(files);
   }
 
-  async function uploadImage(file) {
+  async function uploadImages(files) {
     uploadState = "uploading";
-    statusMessage = "Uploading image...";
+    statusMessage = files.length > 1 ? `Uploading ${files.length} images...` : "Uploading image...";
     dispatch('uploading');
 
     try {
-      var formData = new FormData();
-      formData.append("image", file);
-      formData.append("source", selectedSource);
+      var totalEvents = [];
 
-      var res = await fetch("/perception", {
-        method: "POST",
-        body: formData
-      });
+      for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+        var formData = new FormData();
+        formData.append("image", file);
+        formData.append("source", "drone"); // Default source
 
-      if (!res.ok) {
-        var errText = await res.text();
-        throw new Error(errText || `Server responded with status ${res.status}`);
+        statusMessage = files.length > 1
+          ? `Uploading ${i + 1}/${files.length}: ${file.name}...`
+          : "Uploading image...";
+
+        var res = await fetch("/perception", {
+          method: "POST",
+          body: formData
+        });
+
+        if (!res.ok) {
+          var errText = await res.text();
+          throw new Error(errText || `Server responded with status ${res.status} on file "${file.name}"`);
+        }
+
+        var data = await res.json();
+        if (data.events) {
+          totalEvents = [...totalEvents, ...data.events];
+        }
       }
 
-      var data = await res.json();
       uploadState = "analyzing";
       statusMessage = "Vision cells perceiving...";
       
       // Wait briefly for snazzy visual transition
       setTimeout(() => {
         uploadState = "success";
-        statusMessage = `Triggered ${data.accepted || 0} events!`;
-        dispatch('events', data.events || []);
+        statusMessage = `Triggered ${totalEvents.length} events!`;
+        dispatch('events', totalEvents);
         
         // Reset to idle after 4 seconds
         setTimeout(() => {
@@ -109,7 +125,7 @@
 
     } catch (err) {
       uploadState = "error";
-      statusMessage = err.message || "Failed to parse image";
+      statusMessage = err.message || "Failed to parse images";
       dispatch('error', statusMessage);
     }
   }
@@ -164,19 +180,7 @@
     <span class="pulse-indicator" class:active={uploadState !== 'idle'}></span>
   </div>
 
-  <!-- Source Toggle Selector -->
-  <div class="source-toggle">
-    <button class="source-btn" class:active={selectedSource === 'drone'} on:click={() => selectedSource = 'drone'}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l-7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-      DRONE
-    </button>
-    <button class="source-btn" class:active={selectedSource === 'satellite'} on:click={() => selectedSource = 'satellite'}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path><path d="M2 12h20"></path></svg>
-      SATELLITE
-    </button>
-  </div>
-
-  <!-- Drag and Drop Dropzone -->
+  <!-- Drag and Drop Dropzone (Manual Multi-Select Enabled) -->
   <div 
     class="upload-dropzone" 
     class:drag-active={dragActive} 
@@ -194,6 +198,7 @@
       accept="image/*" 
       style="display: none;" 
       bind:this={fileInput} 
+      multiple
       on:change={handleFileSelect}
     />
 
@@ -205,7 +210,7 @@
       <div class="upload-icon-wrap">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
       </div>
-      <span class="upload-text-primary">Drag & Drop Image</span>
+      <span class="upload-text-primary">Drag & Drop Images</span>
       <span class="upload-text-secondary">or click to browse local files</span>
     {:else if uploadState === 'uploading'}
       <div class="upload-loader"></div>
@@ -240,3 +245,4 @@
     {/each}
   </div>
 </div>
+
