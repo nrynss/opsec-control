@@ -304,9 +304,16 @@ body {
 .main-area {
   grid-area: main;
   display: grid;
-  grid-template-rows: auto 180px 1fr;
+  grid-template-rows: 280px 1fr;
   gap: 12px;
   height: calc(100vh - 96px);
+}
+
+.top-row-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  height: 100%;
 }
 
 /* Cerebro Map Styling */
