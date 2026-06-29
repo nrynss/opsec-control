@@ -39,7 +39,7 @@ func (g *Generator) Compile(ctx context.Context, seed int64) (*contracts.Scenari
 		prompt string
 	}{
 		{"Act 1: Mainshock", "M6.8 earthquake. Highgate collapses. Vora and Iron bridges closed. Power off in Highgate/Central. Casualty surge at Central General."},
-		{"Act 2: Aftershock & Fire", "M5.9 aftershock. South Span closes (isolating Westbank/Southport). Ironworks gas main fire. Westbank Clinic overwhelmed. Dam stress rises."},
+		{"Act 2: Aftershock & Fire", "M5.9 aftershock. South Span closes (isolating Westside/Southport). Ironworks gas main fire. Westside Clinic overwhelmed. Dam stress rises."},
 		{"Act 3: Levee Breach", "Mainor dam release. Southport levee breaches. Flooding spreads. Shelter filling in Greenfield."},
 	}
 
@@ -132,7 +132,7 @@ func (g *Generator) createSubstrate() contracts.WorldState {
 			"S-CENTRAL":    {ID: "S-CENTRAL", Name: "Central", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 300000},
 			"S-IRONWORKS":  {ID: "S-IRONWORKS", Name: "Ironworks", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 100000},
 			"S-HARBORSIDE": {ID: "S-HARBORSIDE", Name: "Harborside", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 120000},
-			"S-WESTBANK":   {ID: "S-WESTBANK", Name: "Westbank", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 200000},
+			"S-WESTBANK":   {ID: "S-WESTBANK", Name: "Westside", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 200000},
 			"S-SOUTHPORT":  {ID: "S-SOUTHPORT", Name: "Southport", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 180000},
 			"S-GREENFIELD": {ID: "S-GREENFIELD", Name: "Greenfield", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 100000},
 			"S-MAINOR":     {ID: "S-MAINOR", Name: "Mainor Heights", Power: contracts.PowerOn, Comms: contracts.UtilityUp, Water: contracts.UtilityUp, Gas: contracts.UtilityUp, Population: 50000},
@@ -150,7 +150,7 @@ func (g *Generator) createSubstrate() contracts.WorldState {
 		},
 		Hospitals: map[contracts.HospitalID]contracts.Hospital{
 			"H-CENTRAL":  {ID: "H-CENTRAL", Name: "Central General", Sector: "S-CENTRAL", Beds: 500, ICU: 50, ER: 100, Occupancy: 300, Band: contracts.HospitalNormal, OnGenerator: false},
-			"H-WESTBANK": {ID: "H-WESTBANK", Name: "Westbank Clinic", Sector: "S-WESTBANK", Beds: 100, ICU: 10, ER: 20, Occupancy: 60, Band: contracts.HospitalNormal, OnGenerator: false},
+			"H-WESTBANK": {ID: "H-WESTBANK", Name: "Westside Clinic", Sector: "S-WESTBANK", Beds: 100, ICU: 10, ER: 20, Occupancy: 60, Band: contracts.HospitalNormal, OnGenerator: false},
 		},
 		Shelters: map[contracts.ShelterID]contracts.Shelter{
 			"SH-GREENFIELD-1": {ID: "SH-GREENFIELD-1", Name: "Greenfield Uni Shelter", Sector: "S-GREENFIELD", Capacity: 2000, Occupancy: 0, Full: false},

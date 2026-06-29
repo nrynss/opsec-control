@@ -70,7 +70,7 @@
       version: 0,
       time: 0,
       sectors: {
-        "westbank": { id: "westbank", name: "Westbank", power: "on", comms: "up", water: "up", gas: "up", population: 45000 },
+        "westbank": { id: "westbank", name: "Westside", power: "on", comms: "up", water: "up", gas: "up", population: 45000 },
         "greenfield": { id: "greenfield", name: "Greenfield", power: "on", comms: "up", water: "up", gas: "up", population: 30000 },
         "harborside": { id: "harborside", name: "Harborside", power: "on", comms: "up", water: "up", gas: "up", population: 15000 },
         "central": { id: "central", name: "Central", power: "on", comms: "up", water: "up", gas: "up", population: 80000 },

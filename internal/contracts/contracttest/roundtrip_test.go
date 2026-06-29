@@ -79,11 +79,11 @@ func TestWorldStateRoundTrip(t *testing.T) {
 
 func TestCOPRoundTrip(t *testing.T) {
 	in := contracts.CommonOperationalPicture{
-		Summary:      "Two bridges down; Westbank isolated.",
+		Summary:      "Two bridges down; Westside isolated.",
 		StateVersion: 42,
 		OverallRisk:  contracts.RiskCritical,
 		PrioritizedActions: []contracts.PrioritizedAction{
-			{Priority: 1, Action: "Airlift casualties from Westbank Clinic", Owner: contracts.CellMedical},
+			{Priority: 1, Action: "Airlift casualties from Westside Clinic", Owner: contracts.CellMedical},
 		},
 		CellOutputs: []contracts.CellOutput{
 			{Cell: contracts.CellInfrastructure, Summary: "Vora + Iron closed", RiskLevel: contracts.RiskHigh,

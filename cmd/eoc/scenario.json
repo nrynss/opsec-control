@@ -10,7 +10,7 @@
       "S-CENTRAL": {"id": "S-CENTRAL", "name": "Central", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 300000},
       "S-IRONWORKS": {"id": "S-IRONWORKS", "name": "Ironworks", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 100000},
       "S-HARBORSIDE": {"id": "S-HARBORSIDE", "name": "Harborside", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 120000},
-      "S-WESTBANK": {"id": "S-WESTBANK", "name": "Westbank", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 200000},
+      "S-WESTBANK": {"id": "S-WESTBANK", "name": "Westside", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 200000},
       "S-SOUTHPORT": {"id": "S-SOUTHPORT", "name": "Southport", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 180000},
       "S-GREENFIELD": {"id": "S-GREENFIELD", "name": "Greenfield", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 100000},
       "S-MAINOR": {"id": "S-MAINOR", "name": "Mainor Heights", "power": "on", "comms": "up", "water": "up", "gas": "up", "population": 50000}
@@ -21,14 +21,14 @@
       "B-SOUTH": {"id": "B-SOUTH", "name": "South Span", "status": "open"}
     },
     "roads": {
-      "R-WEST-1": {"id": "R-WEST-1", "name": "Westbank Connector", "status": "open"},
+      "R-WEST-1": {"id": "R-WEST-1", "name": "Westside Connector", "status": "open"},
       "R-SOUTH-1": {"id": "R-SOUTH-1", "name": "Southport Access", "status": "open"}
     },
     "dam": {"id": "D-MAINOR", "status": "normal", "reservoirPct": 0.75, "stressRating": 0.1},
     "levee": {"id": "L-SOUTHPORT", "status": "intact", "height": 5.0, "integrity": 0.9},
     "hospitals": {
       "H-CENTRAL": {"id": "H-CENTRAL", "name": "Central General", "sector": "S-CENTRAL", "beds": 500, "icu": 50, "er": 100, "occupancy": 300, "band": "normal", "onGenerator": false},
-      "H-WESTBANK": {"id": "H-WESTBANK", "name": "Westbank Clinic", "sector": "S-WESTBANK", "beds": 100, "icu": 10, "er": 20, "occupancy": 60, "band": "normal", "onGenerator": false}
+      "H-WESTBANK": {"id": "H-WESTBANK", "name": "Westside Clinic", "sector": "S-WESTBANK", "beds": 100, "icu": 10, "er": 20, "occupancy": 60, "band": "normal", "onGenerator": false}
     },
     "shelters": {
       "SH-GREENFIELD-1": {"id": "SH-GREENFIELD-1", "name": "Greenfield Uni Shelter", "sector": "S-GREENFIELD", "capacity": 2000, "occupancy": 0, "full": false},

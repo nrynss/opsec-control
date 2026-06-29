@@ -439,7 +439,7 @@ func (c *Client) completeMock(ctx context.Context, req contracts.LLMRequest) (co
 			"confidence": 0.95,
 			"stateVersion": %d,
 			"recommendations": [
-				"Airlift critical casualties from Westbank Clinic",
+				"Airlift critical casualties from Westside Clinic",
 				"Deploy USAR search teams to Highgate",
 				"Inspect Vora and Iron bridges for structural integrity"
 			],
@@ -470,12 +470,12 @@ func (c *Client) completeMock(ctx context.Context, req contracts.LLMRequest) (co
 	case strings.Contains(cell, "medical"):
 		content = fmt.Sprintf(`{
 			"agent": "Medical",
-			"summary": "Casualty surge at Central General. Westbank Clinic cut off from transport loop, occupancy straining.",
+			"summary": "Casualty surge at Central General. Westside Clinic cut off from transport loop, occupancy straining.",
 			"riskLevel": "Critical",
 			"confidence": 0.92,
 			"stateVersion": %d,
 			"recommendations": [
-				"Airlift critical patients from Westbank Clinic",
+				"Airlift critical patients from Westside Clinic",
 				"Establish triage tent at Greenfield evacuation center"
 			],
 			"evidence": [

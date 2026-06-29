@@ -7,7 +7,7 @@
   // designed to look like a clean grid-aligned dashboard map.
   var sectorGeom = {
     "westbank": {
-      name: "Westbank",
+      name: "Westside",
       points: "40,40 320,40 300,240 40,240",
       textX: 180,
       textY: 140
@@ -180,11 +180,11 @@
     <text x="350" y="22" font-size="8" fill="#94a3b8">DAM</text>
 
     <!-- Bridges spanning the river -->
-    <!-- Vora Bridge (Westbank <-> Central) -->
+    <!-- Vora Bridge (Westside <-> Central) -->
     <line x1="305" y1="130" x2="355" y2="130" class="map-bridge {getBridgeClass('vora')}" title="Vora Bridge" />
     <text x="330" y="120" font-size="8" fill="#94a3b8" text-anchor="middle">Vora</text>
 
-    <!-- Iron Bridge (Westbank <-> Central/Southport boundary) -->
+    <!-- Iron Bridge (Westside <-> Central/Southport boundary) -->
     <line x1="298" y1="240" x2="342" y2="240" class="map-bridge {getBridgeClass('iron')}" title="Iron Bridge" />
     <text x="320" y="255" font-size="8" fill="#94a3b8" text-anchor="middle">Iron</text>
 
