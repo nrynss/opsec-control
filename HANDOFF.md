@@ -205,6 +205,13 @@ To claim: change the cell to 🔵 with your builder name + date in the same comm
 | **P16** | ✅ **Done — Claude Builder (2026-06-29)** | deploy/build + docs | Docs ✅ (OPENROUTER_* in .env.example; hosting.md §4.1). **Live validation: 2×2 matrix all-green** (Cerebras + OpenRouter, text + vision) after the **P17** `internal/llm` fixes landed. | P8, P9, **P17** |
 | **P17** | ✅ **Done — Claude Builder (2026-06-29)** | `internal/llm` | Fix dual-provider bugs found by P16 validation (see findings below): object-wrapped perception schema, `extractJSON` fence/prose stripping, `response_format` sent for OpenRouter too, vision event-type aliases. All providers green for text + vision. | P9 |
 | **P18** | ✅ **Done — Claude Builder (2026-06-29)** | `web/` + `cmd/eoc` + `internal/api` | Preset "scenario" buttons now **inject real events** (POST `/events`) instead of mock-only filename strings (which 400'd the real vision API). Apply-time timestamp stamping in `cmd/eoc` `handle()` keeps injected events monotonic-valid; `/events` no longer stamps. (See "P18" section below.) | P16/P17 |
+| **P19** | ⬜ **Unclaimed** | `internal/contracts` | §0.5 contract change: Add SimulationStats, SimulationController, and TokenStatsProvider to `interfaces.go`. | — |
+| **P20** | ⬜ **Unclaimed** | `internal/llm` + `simulation` + `state` + `timeline` | Core engines update: atomic counters, wall stopwatch, state reset, and timeline truncate. | P19 |
+| **P21** | ⬜ **Unclaimed** | `internal/api` + `cmd/eoc` | EOC coordinator and WS broadcast of "reset" kind + actual API endpoint wiring. | P20 |
+| **P22** | ⬜ **Unclaimed** | `web/` | Svelte visual updates: All Clear button, timeline clock with limits, stats dashboard widget. | P21 |
+| **P23** | ⬜ **Unclaimed** | verification/tests | Add contracts roundtrip + engine + llm stats unit tests. Manual validation of All Clear. | P22 |
+
+
 
 ### P16 validation findings + P17 fixes (2026-06-29, live keys)
 Ran `cmd/eoc` against real Cerebras + OpenRouter keys (scenario replay = text;
@@ -288,6 +295,27 @@ serves the dashboard **live** (real metrics, scenario replay, COPs) and the
 `/provider` switch works in-container. This is the same image Fly will build — the
 remaining deploy steps are mechanical (see [`hosting.md`](hosting.md) §4).
 
+### Live on Fly.io (2026-06-29) — IN PROGRESS
+App **`cerebro-eoc`** created and deployed from [`fly.toml`](fly.toml) (region
+`iad`, single-origin image). URL: **https://cerebro-eoc.fly.dev/**.
+
+Gotchas hit + fixes (record for the Cloud Run migration / re-deploys):
+- **Fly creates 2 machines by default** (HA, zero-downtime) — this **violates the
+  single-instance rule**. Always `fly scale count 1` immediately after deploy and
+  confirm with `fly status` (exactly 1 machine). The 512mb/iad/no-auto-stop config
+  is in `fly.toml`, but the machine *count* is not — it must be scaled explicitly.
+- **Secrets**: set the two keys from `.env` (do NOT put them in `fly.toml`):
+  `fly secrets set CEREBRAS_API_KEY=… OPENROUTER_API_KEY=…` (a placeholder typo
+  leaves the app in **mock mode** — no real LLM). Setting secrets rolls the machine.
+
+Post-deploy verification (the demo bar): `fly status` shows 1 machine; the page
+loads **Live / Connected** (not Offline/Demo); provider dropdown flips; a preset
+button fires a real fan-out. **A follow-up commit will mark this Done once verified
+live with secrets set.**
+
+**Still pending:** Cloudflare custom domain (CNAME → `cerebro-eoc.fly.dev`,
+proxied, Full(strict)) — see [`hosting.md`](hosting.md) §5.
+
 ### Deploy decision (2026-06-29): single-origin on Fly.io (Cloud Run later)
 Per [`hosting.md`](hosting.md): **one Go container serves both the static
 dashboard (`web/dist`) and the API/WS**, fronted by Cloudflare. Single-origin
@@ -325,13 +353,18 @@ Sector/clinic/road **display names** renamed `Westbank` → `Westside` across `w
    scoped in [`TASK-ui-scrollback.md`](TASK-ui-scrollback.md), can start now. **P15**
    (further polish) overlaps with the provider dropdown (P12).
 8. **P16** (docs/deploy) last.
+9. **P19** (simulation contracts) — coordinates interfaces and stats DTO shapes first.
+10. **P20** (backend implementation of stopwatch, counters, store reset, and timeline truncate).
+11. **P21** (API endpoint implementation and cmd/eoc coordinator).
+12. **P22** (Astro/Svelte HUD, PlaybackControl stats and All Clear button).
+13. **P23** (Verification of resets, counters, and timeline truncation via tests).
 
 **Independence guarantee:** each parcel owns a disjoint set of files —
 P1=`contracts/`, P2=`internal/llm`, P3=`internal/agents`, P4=`internal/orchestrator`,
 P5=`internal/api`, P6=`cmd/eoc/main.go`, P7=`web/`, P8=`Dockerfile`+`Taskfile.yml`+`.env.example`,
-P9=`internal/llm`, P10=`internal/api`, P11=`cmd/eoc`, P12–P15=`web/`, P16=deploy/docs.
-The only shared seam is `contracts/` (P1), so land P1 first; after that the rest
-never touch the same file.
+P9=`internal/llm`, P10=`internal/api`, P11=`cmd/eoc`, P12–P15=`web/`, P16=deploy/docs,
+P19=`internal/contracts/interfaces.go`, P20=backend engine implementations (`internal/llm`, `internal/simulation`, `internal/state`, `internal/timeline`), P21=`internal/api` + `cmd/eoc`, P22=`web/`, P23=tests (`internal/contracts/contracttest`, `internal/simulation/engine_test.go`, `internal/llm/client_test.go`).
+The only shared seams are `contracts/` (P1 and P19), so land P1 and P19 first; after that the rest never touch the same files.
 
 ### Priority for demo impact
 1. **Telemetry** (P1 + P3 + P4 + HUD half of P7) — turns the HUD's fake
@@ -343,3 +376,45 @@ never touch the same file.
    cheapest to add, mind RPM.
 4. **P9–P11** enable provider comparison (global switch to OpenRouter for same model).
 5. **P13–P15** address current UI problems (map too big, data areas too small, logs refresh instead of hold+scroll) + general polish.
+6. **All Clear, Clock, and Stats** (P19–P23) — adds the visual timeline slider, wall/sim telemetry stats, and system-wide reset controls.
+
+---
+
+### Simulation Clock, Stats, & All Clear (P19–P23) — Detailed Design
+
+#### P19 Coordinated Contract Addition
+- Add `SimulationStats` DTO, `SimulationInfo` struct, `SimulationController`, and `TokenStatsProvider` to `internal/contracts/interfaces.go`.
+
+#### P20 Core Engines Reset & Stats Support
+- **`internal/llm` (`client.go`)**: Add thread-safe atomic counters for `tokensIn`, `tokensOut`, and `requestCount`. Increment on successful model completions and interpretations (both real and mock). Expose `TotalTokens()`, `TotalRequests()`, and `ResetStats()`. Mock mode completions increment these counters with simulated values (~1000 input, ~300 output tokens per call) so the offline/demo mode dashboard shows telemetry movement.
+- **`internal/simulation` (`engine.go`)**: Add `wallStart time.Time` and `wallElapsed time.Duration`. Manage the stopwatch in lifecycle methods: start on `Step()` or when entering unpaused `Run()`, accumulate on `Pause()`, freeze on scenario completion, and reset to zero on `Reset()`. Expose `Status()`, `Info() SimulationInfo`, and `WallElapsed()`.
+  - **Determinism Firewall**: The stopwatch is strictly for display telemetry and isolated from any state, event generation, COP, or replay logic. It must never affect determinism and is excluded from contracttest assertions.
+- **`internal/state` (`store.go`)**: Expose a thread-safe `Reset(initial contracts.WorldState)` method to reload the scenario's t=0 substrate. This method clears the `seen` duplicate event ID map. It is documented as the single sanctioned exception to the single-mutator rule.
+- **`internal/timeline` (`timeline.go`)**: Expose a thread-safe `Truncate()` method to clear timeline log entries.
+
+#### P21 API Controllers & cmd/eoc Wiring
+- **`internal/api` (`api.go`)**: Add `SimulationController` and `TokenStatsProvider` to `api.Server`. Update `/scenario/reset`, `/scenario/pause`, `/scenario/resume`, `/scenario/step`, `/scenario/speed` endpoints. Add `GET /scenario/stats` endpoint returning the parsed `SimulationStats` JSON.
+- **`cmd/eoc` (`main.go`)**: Define `eocSimController` struct:
+  ```go
+  type eocSimController struct {
+      sim      *simulation.Engine
+      store    *state.Store
+      tl       *timeline.Timeline
+      initial  contracts.WorldState
+      copStore *copStore
+      bcast    api.Broadcaster
+  }
+  ```
+  Implement the `SimulationController` interface. 
+  - **Reset Epoch Guard**: Implement `epoch` tracking. On `Reset()`, increment the epoch, cancel the reasoning context (which aborts all in-flight cell/orchestrator calls), unsubscribe and resubscribe to the EventBus to discard queued events, and launch a new `runLoop` goroutine with the new context and epoch. Discard callbacks and WS broadcasts from outdated epochs.
+  - **Reset Actions**: Call `sim.Pause()`, `sim.Reset()`, `store.Reset()`, `tl.Truncate()`, append a synthetic `SystemReset` event (`tl.Append(contracts.Event{ID: "system-reset", Timestamp: 0, Source: "system", Type: "SystemReset", Confidence: 1.0})`), reset `copStore` to Low risk, and broadcast `kind: "reset"` message over WS.
+
+#### P22 Frontend Svelte Components
+- **`PlaybackControl.svelte`**: Render a green styled **All Clear** button. Render a horizontal **Simulation Progress** timeline bar with Start and End bounds. Render a **Simulation Metrics** grid showing elapsed Sim time, elapsed Wall time, replayed event count, LLM tokens, and inferences run.
+- **`Dashboard.svelte`**: Periodically poll `/scenario/stats` every 1s (or fake metrics locally in demo mode). Handle WS `kind: "reset"` to empty the local timeline/COP/cell logs.
+
+#### P23 Verification & Sequencing
+- **Sequencing**: Deploy the current green build to Fly.io first to freeze the baseline, then branch to implement P19-P23.
+- **Tests**: Write stats tests in `internal/simulation/engine_test.go` and `internal/llm/client_test.go`. Include a determinism firewall test in `engine_test.go` asserting that varying wall-clock times or stopwatch reads do not change scenario replay events or logical timing. Ensure `task check` compiles and all tests pass.
+
+
