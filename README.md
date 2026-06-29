@@ -16,7 +16,7 @@ The video runs the full `cerebro-cascade` scenario on both backends. On **Cerebr
 
 ### Navigate the Site in 3 Steps
 
-1. **Start the simulation** — In the **Playback Controller** (left sidebar), select the **`cerebro-cascade`** scenario, click **Load**, then **Play**. Use the speed buttons (up to `10×`) or **Step** to advance event-by-event, and **Reset** to start over.
+1. **Initialize, then play** — On load, the **Initialize Command Center** overlay prompts you to pick a scenario (**Cerebro Earthquake Cascade**) and click **Initialize**. The dashboard arms at `09:00:00`, paused. Click **Play** on the **Playback Controller** (left sidebar) to begin — speed up to `10×`, **Step** through event-by-event, or **All Clear** to reset.
 2. **Watch the parallel fan-out** — When an anomaly hits (e.g., the M6.8 mainshock at `+6s`), the five **Specialist Cells** (bottom — Intel, Infra, Medical, Population, Comms) all flash `Analyzing…` at once, the **HUD** (top) shows latency and token throughput spiking, and the **Commander Cell** (top center) synthesizes a unified COP with a prioritized task list. Track unfolding events in the **System Event Log** and hazards on the **Cerebro Map**.
 3. **Inject your own events** — In the **Perception Ingest** box, upload a drone/satellite photo or click a preset (e.g., *Vora Bridge Collapse*). The system interprets it, logs it, recolors the map, and triggers the Cells to re-reason the response plan.
 
@@ -26,9 +26,11 @@ The HUD (top bar) has an **LLM Provider** dropdown that switches inference betwe
 
 To compare:
 
-1. Run a scenario on **Cerebras** and note the **latency** and **tok/s** readouts in the HUD as the Cells fan out.
-2. Switch the dropdown to **OpenRouter** and re-run (or **Reset** + **Play**).
-3. Watch the same metrics — **Cerebras resolves the full fan-out in seconds; the conventional provider takes minutes** for the identical work. The wafer-scale advantage is a step-change in time-to-first-token and sustained throughput, with little to no change to the model's actual answers.
+1. Run a scenario on **Cerebras** and watch the **Decision Latency** and **Total Decision Time** cards (in **Simulation Telemetry**, left sidebar) plus the HUD's tok/s as the Cells fan out.
+2. Switch the dropdown to **OpenRouter**, hit **All Clear**, and re-run.
+3. Compare the same cards — **Cerebras resolves the full fan-out in seconds; the conventional provider takes minutes** for the identical work. The wafer-scale advantage is a step-change in time-to-first-token and sustained throughput, with little to no change to the model's actual answers.
+
+> Both telemetry cards remember the last run **per provider**, so you can hover either one to see the Cerebras-vs-OpenRouter numbers side by side with the speed ratio — the comparison survives the toggle.
 
 > This seconds-vs-minutes gap is the whole point: in a real emergency, the COP has to update *faster than the disaster evolves*. The model's reasoning is the same on both backends — only Cerebras delivers it inside the decision window.
 
@@ -96,10 +98,10 @@ The dashboard provides a **Common Operational Picture (COP)** representing the s
 +------------------------------------+-------------------------------------------+
 |                                    |  [4] COMMANDER CELL (COP)                 |
 |  [2] PLAYBACK CONTROLLER           |      - Real-time overall risk assessment  |
-|      - Scenario selection          |      - Synthesized priority task list    |
-|      - Play, Step, Reset           +-------------------------------------------+
-|      - Speed slider (1x - 10x)     |  [5] CEREBRO MAP                          |
-|      - Simulation telemetry stats  |      - Interactive city sectors           |
+|      - Play / Step / All Clear     |      - Synthesized priority task list    |
+|      - Speed slider (1x - 10x)     +-------------------------------------------+
+|      - Total Decision Time         |  [5] CEREBRO MAP                          |
+|      - Decision Latency stats      |      - Interactive city sectors           |
 |                                    |      - Real-time bridge & road closures   |
 |  [3] SYSTEM EVENT LOG              |      - Spreading fire & flood overlays     |
 |      - Time-stamped event list     +-------------------------------------------+
@@ -113,8 +115,8 @@ The dashboard provides a **Common Operational Picture (COP)** representing the s
 
 Each numbered panel above:
 
-* **[1] HUD** — live latency, token throughput (tok/s), active Cell count, state version, and inference provider.
-* **[2] Playback Controller** — scenario selection, Load / Play / Step / Reset, the 1×–10× speed slider, and simulation telemetry.
+* **[1] HUD** — live fan-out latency, token throughput (tok/s), active Cell count, state version, inference provider, and connection status (`DISCONNECTED` / `COMPLETE` badges).
+* **[2] Playback Controller** — Play / Step / All Clear (reset), the 1×–10× speed slider, and the **Simulation Telemetry** grid (Total Decision Time, Decision Latency, events, tokens, inferences). The scenario is chosen once at startup via the **Initialize Command Center** overlay.
 * **[3] System Event Log** — time-stamped events with ingest confidence ratings.
 * **[3.5] Perception Ingest** — upload imagery or fire a preset to inject a multimodal event.
 * **[4] Commander Cell (COP)** — real-time overall risk assessment and synthesized priority task list.
