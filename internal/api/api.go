@@ -314,7 +314,7 @@ func (s *Server) handlePostPerception(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetProvider reports the current LLM provider (P10).
-// Returns 503 if no ProviderSwitcher wired.
+// Returns 200 on success or 503 if no ProviderSwitcher wired.
 func (s *Server) handleGetProvider(w http.ResponseWriter, r *http.Request) {
 	if s.provider == nil {
 		http.Error(w, "provider switch not wired", http.StatusServiceUnavailable)

@@ -345,9 +345,11 @@ func TestProviderGetSetBroadcast(t *testing.T) {
 	if len(bc.msgs) != 1 {
 		t.Fatalf("expected 1 broadcast, got %d", len(bc.msgs))
 	}
-	// check broadcast shape
+	// check broadcast shape + payload
 	if m, ok := bc.msgs[0].(map[string]any); !ok || m["kind"] != "provider" {
 		t.Fatalf("broadcast wrong shape: %+v", bc.msgs[0])
+	} else if payload, ok := m["payload"].(map[string]any); !ok || payload["provider"] != "openrouter" {
+		t.Fatalf("broadcast payload missing or wrong provider: %+v", m["payload"])
 	}
 
 	// GET after
@@ -389,5 +391,28 @@ func TestProviderBadInput(t *testing.T) {
 		if w.Code != c.code {
 			t.Errorf("bad input %q: expected %d, got %d", c.body, c.code, w.Code)
 		}
+	}
+}
+
+func TestProviderPostWithNilBcast(t *testing.T) {
+	// Ensure switch succeeds even when no broadcaster (P10 review feedback)
+	store := &mockStore{}
+	bus := &mockBus{}
+	log := &mockLog{}
+	ps := &mockProviderSwitcher{p: "cerebras"}
+
+	srv := New(store, bus, log, nil, nil, ps, nil)
+	mux := http.NewServeMux()
+	srv.Register(mux)
+
+	req := httptest.NewRequest("POST", "/provider", bytes.NewReader([]byte(`{"provider":"openrouter"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("nil bcast POST: expected 202, got %d", w.Code)
+	}
+	if ps.Provider() != "openrouter" {
+		t.Fatalf("switch should have taken effect with nil bcast: %q", ps.Provider())
 	}
 }
