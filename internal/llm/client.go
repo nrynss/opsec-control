@@ -106,7 +106,7 @@ func NewClient(cfg Config) *Client {
 	}
 	openrouterModel := os.Getenv("OPENROUTER_MODEL")
 	if openrouterModel == "" {
-		openrouterModel = "google/gemma-3-27b-it"
+		openrouterModel = "google/gemma-4-31b-it"
 	}
 
 	// Override from explicit Config fields.
