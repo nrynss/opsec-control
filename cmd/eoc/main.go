@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -75,6 +76,25 @@ type app struct {
 	orch       contracts.Orchestrator
 	cop        *copStore
 	ws         *websocket.Server // may be nil in tests
+	epoch      int32
+}
+
+// eocSimController coordinates the EOC for simulation controls and reset (P24).
+// It implements contracts.SimulationController.
+type eocSimController struct {
+	sim      *simulation.Engine
+	store    *state.Store
+	tl       *timeline.Timeline
+	initial  contracts.WorldState
+	copStore *copStore
+	bcast    api.Broadcaster
+	app      *app
+	bus      contracts.EventBus
+	parentCtx context.Context
+
+	mu            sync.Mutex
+	reasoningCancel context.CancelFunc
+	subCancel       func()
 }
 
 // handle processes one event: validate+apply, push the new snapshot, and — for a
@@ -130,7 +150,8 @@ func (a *app) broadcast(kind string, payload any) {
 // runLoop reasons over each event from ch until ctx is done. The caller
 // subscribes (synchronously, before replay starts) so the state-applying loop
 // cannot miss early events.
-func (a *app) runLoop(ctx context.Context, ch <-chan contracts.Event) {
+// epoch is used to discard events from previous generations after reset.
+func (a *app) runLoop(ctx context.Context, ch <-chan contracts.Event, expectedEpoch int32) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -139,9 +160,112 @@ func (a *app) runLoop(ctx context.Context, ch <-chan contracts.Event) {
 			if !ok {
 				return
 			}
+			if atomic.LoadInt32(&a.epoch) != expectedEpoch {
+				continue // discard from old epoch after reset
+			}
 			a.handle(ctx, ev)
 		}
 	}
+}
+
+// startLoop starts a new reasoning loop with a fresh subscription and context
+// for the current epoch.
+func (c *eocSimController) startLoop() {
+	c.mu.Lock()
+	epoch := atomic.AddInt32(&c.app.epoch, 1)
+	if c.reasoningCancel != nil {
+		c.reasoningCancel()
+	}
+	if c.subCancel != nil {
+		c.subCancel()
+	}
+	reasoningCtx, cancel := context.WithCancel(c.parentCtx)
+	c.reasoningCancel = cancel
+	ch, subCancel := c.bus.Subscribe()
+	c.subCancel = subCancel
+	c.mu.Unlock()
+
+	go c.app.runLoop(reasoningCtx, ch, epoch)
+}
+
+// Reset implements the coordinated reset with epoch guard and actions.
+func (c *eocSimController) Reset() {
+	// increment epoch via app
+	atomic.AddInt32(&c.app.epoch, 1)
+
+	if c.reasoningCancel != nil {
+		c.reasoningCancel()
+	}
+	if c.subCancel != nil {
+		c.subCancel()
+	}
+
+	// Perform reset actions
+	c.sim.Pause()
+	c.sim.Reset()
+	c.store.Reset(c.initial)
+	c.tl.Truncate()
+
+	// Append synthetic reset event to timeline (for log)
+	ev := contracts.Event{
+		ID:         "system-reset",
+		Timestamp:  0,
+		Source:     "system",
+		Type:       "SystemReset",
+		Confidence: 1.0,
+	}
+	c.tl.Append(ev)
+
+	// Reset COP to nominal
+	c.copStore.set(contracts.CommonOperationalPicture{
+		Summary:     "All clear. System reset to nominal state.",
+		OverallRisk: "Low",
+	})
+
+	// Broadcast reset kind over WS for frontend (P25)
+	if c.bcast != nil {
+		c.bcast.Broadcast(map[string]any{"kind": "reset"})
+	}
+
+	// Restart loop with new epoch
+	c.startLoop()
+}
+
+// Other methods delegate to sim
+func (c *eocSimController) Pause() {
+	c.sim.Pause()
+}
+
+func (c *eocSimController) Resume() {
+	c.sim.Resume()
+}
+
+func (c *eocSimController) Step() (bool, error) {
+	return c.sim.Step()
+}
+
+func (c *eocSimController) SetSpeed(f float64) {
+	c.sim.SetSpeed(f)
+}
+
+func (c *eocSimController) Info() contracts.SimulationInfo {
+	return c.sim.Info()
+}
+
+func (c *eocSimController) WallElapsedMS() int64 {
+	return c.sim.WallElapsedMS()
+}
+
+func (c *eocSimController) Status() string {
+	return c.sim.Status()
+}
+
+func (c *eocSimController) CurrentTime() contracts.SimTime {
+	return c.sim.CurrentTime()
+}
+
+func (c *eocSimController) Speed() float64 {
+	return c.sim.Speed()
 }
 
 func main() {
@@ -154,6 +278,10 @@ func main() {
 	if port := os.Getenv("PORT"); port != "" {
 		*addr = ":" + port
 	}
+
+	// Create signal context early for use in controller (P24)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// WEB_DIR points at the built web dashboard (default "web/dist").
 	webDir := os.Getenv("WEB_DIR")
@@ -213,7 +341,18 @@ func main() {
 	// Wire perception + provider switch: llmClient implements contracts.Perception;
 	// providerAdapter bridges llm.Provider ↔ string for the api layer (P11).
 	// wsSrv satisfies api.Broadcaster — provider switches are broadcast to clients.
-	api.New(store, bus, tl, cop, llmClient, &providerAdapter{client: llmClient}, wsSrv, sim, nil).Register(mux)
+	ctrl := &eocSimController{
+		sim:       sim,
+		store:     store,
+		tl:        tl,
+		initial:   scn.Initial,
+		copStore:  cop,
+		bcast:     wsSrv,
+		app:       a,
+		bus:       bus,
+		parentCtx: ctx,
+	}
+	api.New(store, bus, tl, cop, llmClient, &providerAdapter{client: llmClient}, wsSrv, ctrl, llmClient).Register(mux)
 	mux.Handle("GET /stream", wsSrv.Handler())
 
 	// Serve the static web dashboard at / (single-origin — HANDOFF §8 deploy decision).
@@ -224,22 +363,15 @@ func main() {
 	})
 	httpSrv := &http.Server{Addr: *addr, Handler: mux}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
-		log.Printf("[eoc] serving on %s (GET /state /agents /timeline /events /provider, WS /stream, POST /provider /perception)", *addr)
+		log.Printf("[eoc] serving on %s (GET /state /agents /timeline /events /provider, WS /stream, POST /provider /perception, GET /scenario/stats)", *addr)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[eoc] http: %v", err)
 		}
 	}()
 
-	// Subscribe the reasoning loop SYNCHRONOUSLY before replay — Publish only
-	// reaches subscribers already registered, so subscribing inside the goroutine
-	// would race the simulator's first (t=0) event and drop it from state.
-	eventCh, cancelSub := bus.Subscribe()
-	defer cancelSub()
-	go a.runLoop(ctx, eventCh)
+	// Start reasoning loop with epoch support (P24)
+	ctrl.startLoop()
 
 	// Replay the scenario onto the bus.
 	if err := sim.Load(scn); err != nil {

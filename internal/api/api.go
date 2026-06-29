@@ -160,11 +160,9 @@ func (s *Server) handlePostEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// respondWithScenarioStub is a helper for the MVD scenario control endpoints.
-// All scenario playback controls (load/reset/pause/resume/step/speed) are
-// intentionally no-ops here; the real engine lives in cmd/eoc + simulation.
-// Returns 202 Accepted + JSON so the frontend treats the calls as successful
-// (callEndpoint returns true) while we wait for real wiring in P6.
+// respondWithScenarioStub is a helper for the scenario control endpoints.
+// Returns 202 Accepted + JSON so the frontend treats the calls as successful.
+
 func (s *Server) respondWithScenarioStub(w http.ResponseWriter, op string, extra ...map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -256,11 +254,11 @@ func (s *Server) handleScenarioStats(w http.ResponseWriter, r *http.Request) {
 		CurrentTime:    s.simCtrl.CurrentTime(),
 		ElapsedTime:    s.simCtrl.CurrentTime() - info.StartTime,
 		WallElapsed:    s.simCtrl.WallElapsedMS(),
-		EventsReplayed: 0, // TODO from timeline or sim in P21
+		EventsReplayed: len(s.log.All()),
 		TokensIn:       in,
 		TokensOut:      out,
 		Inferences:     reqs,
-		Speed:          1.0, // TODO
+		Speed:          s.simCtrl.Speed(),
 	}
 	json.NewEncoder(w).Encode(stats)
 }

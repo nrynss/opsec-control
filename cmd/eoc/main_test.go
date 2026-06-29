@@ -44,6 +44,7 @@ func newTestApp(t *testing.T) (*app, *contracts.Scenario) {
 		orch:       orchestrator.NewEngine(cells),
 		cop:        &copStore{},
 		ws:         nil, // broadcast is a no-op in tests
+		epoch:      0,
 	}
 	return a, scn
 }
@@ -93,7 +94,7 @@ func TestBusPathAppliesAllEvents(t *testing.T) {
 
 	ch, unsub := bus.Subscribe() // subscribe BEFORE publishing
 	defer unsub()
-	go a.runLoop(ctx, ch)
+	go a.runLoop(ctx, ch, 0)
 
 	for _, e := range scn.Events {
 		bus.Publish(e)
