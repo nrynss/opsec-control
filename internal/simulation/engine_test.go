@@ -298,3 +298,69 @@ func TestEngine_ResetInterruptsRun(t *testing.T) {
 		}
 	}
 }
+
+// TestEngine_StatsMethods exercises Status, Info, WallElapsed (P20/P26).
+// These are display-only and must not affect logical replay or determinism.
+func TestEngine_StatsMethods(t *testing.T) {
+	bus := &mockBus{}
+	eng := New(bus)
+
+	if got := eng.Status(); got != "idle" {
+		t.Errorf("initial status = %q, want idle", got)
+	}
+	if info := eng.Info(); info.Name != "" || info.EndTime != 0 {
+		t.Errorf("initial info = %+v, want empty", info)
+	}
+	if ms := eng.WallElapsedMS(); ms != 0 {
+		t.Errorf("initial wallMS = %d, want 0", ms)
+	}
+
+	sc := makeScenario([]contracts.Event{
+		{ID: "e1", Timestamp: 10, Source: "s", Type: contracts.EventMainshockOccurred, Confidence: 1},
+		{ID: "e2", Timestamp: 20, Source: "s", Type: contracts.EventBridgeClosed, Confidence: 1},
+	})
+	if err := eng.Load(sc); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := eng.Status(); got != "running" {
+		t.Errorf("after load status = %q, want running", got)
+	}
+	if info := eng.Info(); info.Name != "test" || info.EndTime != 20 {
+		t.Errorf("info after load = %+v, want name=test end=20", info)
+	}
+
+	// Step advances logical time and starts wall accumulation
+	_, _ = eng.Step()
+	time.Sleep(5 * time.Millisecond)
+	if ms := eng.WallElapsedMS(); ms == 0 {
+		t.Error("expected wall elapsed > 0 after Step")
+	}
+	if got := eng.CurrentTime(); got != 10 {
+		t.Errorf("current time after step = %d, want 10", got)
+	}
+
+	eng.Pause()
+	if got := eng.Status(); got != "paused" {
+		t.Errorf("after pause status = %q, want paused", got)
+	}
+	before := eng.WallElapsedMS()
+	time.Sleep(10 * time.Millisecond)
+	if after := eng.WallElapsedMS(); after != before {
+		t.Error("wall time must not advance while paused")
+	}
+
+	eng.Resume()
+	_, _ = eng.Step() // reach end
+	if got := eng.Status(); got != "complete" {
+		t.Errorf("after final step status = %q, want complete", got)
+	}
+
+	eng.Reset()
+	if got := eng.Status(); got != "running" {
+		t.Errorf("after reset status = %q, want running", got)
+	}
+	if ms := eng.WallElapsedMS(); ms != 0 {
+		t.Errorf("wall after reset = %d, want 0", ms)
+	}
+}
