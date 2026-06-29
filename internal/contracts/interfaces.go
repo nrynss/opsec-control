@@ -134,6 +134,9 @@ type SimulationController interface {
 	Step() (bool, error)
 	SetSpeed(float64)
 	Info() SimulationInfo
+	WallElapsedMS() int64
+	Status() string
+	CurrentTime() SimTime
 }
 
 // TokenStatsProvider provides aggregated LLM usage counters for stats
