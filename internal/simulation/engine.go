@@ -210,8 +210,16 @@ func (e *Engine) getResetCh() <-chan struct{} {
 func (e *Engine) Run(ctx context.Context) error {
 	for {
 		if ctx.Err() != nil {
+			e.mu.Lock()
+			e.updateWallLocked()
+			e.mu.Unlock()
 			return ctx.Err()
 		}
+
+		// Start wall if we are active (for initial Run)
+		e.mu.Lock()
+		e.startWallLocked()
+		e.mu.Unlock()
 
 		// Check for pause.
 		e.mu.Lock()
@@ -237,6 +245,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		// Not paused. Capture current next event + the resetCh generation we will wait on.
 		e.mu.Lock()
 		if e.scenario == nil || e.idx >= len(e.scenario.Events) {
+			e.updateWallLocked()
 			e.mu.Unlock()
 			return nil
 		}
@@ -283,12 +292,6 @@ func (e *Engine) Run(ctx context.Context) error {
 
 		e.bus.Publish(ev)
 	}
-
-	// ensure wall stopped on normal completion
-	e.mu.Lock()
-	e.updateWallLocked()
-	e.mu.Unlock()
-	return nil
 }
 
 // WallElapsed returns accumulated wall time for display stats (P20).
