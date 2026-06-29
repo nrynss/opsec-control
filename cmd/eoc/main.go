@@ -59,6 +59,15 @@ func (c *copStore) set(cop contracts.CommonOperationalPicture) {
 	c.mu.Unlock()
 }
 
+// providerAdapter adapts *llm.Client to api.ProviderSwitcher, converting between
+// llm.Provider and string (P11). The api package must not import llm (§0.2 r3).
+type providerAdapter struct {
+	client *llm.Client
+}
+
+func (a *providerAdapter) Provider() string { return string(a.client.Provider()) }
+func (a *providerAdapter) SetProvider(p string) { a.client.SetProvider(llm.Provider(p)) }
+
 // app holds the wired dependencies for the reasoning loop.
 type app struct {
 	store      contracts.StateStore
@@ -166,7 +175,12 @@ func main() {
 	defer stopTL()
 
 	// Mock mode kicks in automatically when CEREBRAS_API_KEY is unset or LLM_MOCK=true.
-	llmClient := llm.NewClient(llm.Config{})
+	// If OPENROUTER_API_KEY is set and CEREBRAS_API_KEY is not, default to OpenRouter (P11).
+	llmCfg := llm.Config{}
+	if os.Getenv("CEREBRAS_API_KEY") == "" && os.Getenv("OPENROUTER_API_KEY") != "" {
+		llmCfg.Provider = llm.ProviderOpenRouter
+	}
+	llmClient := llm.NewClient(llmCfg)
 	// All 6 cells registered (2026-06-29 roster decision — HANDOFF §8).
 	// The llm semaphore (maxConcurrency=4) queues the 5th specialist under the 4-cap.
 	cells := map[contracts.CellKind]contracts.Cell{
@@ -185,8 +199,10 @@ func main() {
 
 	// --- HTTP/WS edge ---
 	mux := http.NewServeMux()
-	// Wire perception: llmClient implements contracts.Perception.
-	api.New(store, bus, tl, cop, llmClient).Register(mux)
+	// Wire perception + provider switch: llmClient implements contracts.Perception;
+	// providerAdapter bridges llm.Provider ↔ string for the api layer (P11).
+	// wsSrv satisfies api.Broadcaster — provider switches are broadcast to clients.
+	api.New(store, bus, tl, cop, llmClient, &providerAdapter{client: llmClient}, wsSrv).Register(mux)
 	mux.Handle("GET /stream", wsSrv.Handler())
 
 	// Serve the static web dashboard at / (single-origin — HANDOFF §8 deploy decision).
@@ -201,7 +217,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("[eoc] serving on %s (GET /state /agents /timeline /events, WS /stream)", *addr)
+		log.Printf("[eoc] serving on %s (GET /state /agents /timeline /events /provider, WS /stream, POST /provider /perception)", *addr)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[eoc] http: %v", err)
 		}
