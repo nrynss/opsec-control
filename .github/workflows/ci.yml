@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: # manual "Run workflow" button (deploy on demand)
 
 jobs:
   go:
@@ -57,3 +58,27 @@ jobs:
       - uses: actions/checkout@v4
       - name: docker build
         run: docker build -t opsec-control:ci .
+
+  deploy:
+    name: Deploy to Fly.io
+    needs: [go, race, docker] # never deploy a red build
+    # Deploy ONLY on a merge/push to main or via the manual "Run workflow" button —
+    # never on pull_request. Each deploy restarts the single Fly machine, which
+    # resets in-memory world state + restarts the scenario replay, so this is gated
+    # deliberately (see HANDOFF "single-instance rule" + hosting.md §4).
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy
+      cancel-in-progress: false # let an in-flight deploy finish; don't interleave
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: fly deploy (no HA second machine — single-instance rule)
+        run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: enforce single instance (belt-and-suspenders)
+        run: flyctl scale count 1 -y
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

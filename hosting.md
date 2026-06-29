@@ -213,6 +213,40 @@ The server runs **one LLM client** that can speak to either **Cerebras** or
 
 ---
 
+## 4.4 Continuous deployment (GitHub Actions → Fly)
+
+CD lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) as a `deploy`
+job that runs **after** the test/race/docker jobs pass.
+
+**Triggers** (deliberately gated — every deploy restarts the single machine, which
+resets in-memory state + restarts the scenario replay):
+- **push to `main`** → auto-deploy (the prod-promotion path: feature branch → PR →
+  merge to `main` → deploy).
+- **manual** via the Actions **"Run workflow"** button (`workflow_dispatch`) — your
+  escape hatch to control deploy timing (e.g. don't reset prod mid-demo).
+- **never on pull_request.**
+
+**Single-instance safety:** the job runs `flyctl deploy --remote-only --ha=false`
+(stops Fly from creating the HA *second* machine) then `flyctl scale count 1 -y`
+(belt-and-suspenders for the §0 rule). `concurrency: fly-deploy` prevents
+interleaved deploys.
+
+**One-time setup:**
+1. Create a Fly **deploy token** scoped to the app:
+   ```bash
+   fly tokens create deploy -a cerebro-eoc
+   ```
+2. Add it as a GitHub **repository secret** named **`FLY_API_TOKEN`**
+   (repo → Settings → Secrets and variables → Actions → New repository secret).
+
+**Notes:**
+- The provider secrets (`CEREBRAS_*` / `OPENROUTER_*`) already live on Fly and
+  **persist across deploys** — CI never sets them.
+- GitHub reads workflows (and shows the "Run workflow" button) from the **default
+  branch**, so the `deploy` job only activates once `ci.yml` is on `main`.
+
+---
+
 ## 5. Cloudflare DNS (single subdomain)
 
 To serve at `eoc.yourdomain.com`:
