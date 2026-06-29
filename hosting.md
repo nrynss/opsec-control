@@ -249,17 +249,33 @@ interleaved deploys.
 
 ## 5. Cloudflare DNS (single subdomain)
 
-To serve at `eoc.yourdomain.com`:
-1. Cloudflare Dashboard → your domain → **DNS** → **Add record** → **CNAME**.
-2. Name `eoc`, Target = the host's public hostname **without** `https://`
-   (Fly: `cerebro-eoc.fly.dev`; Cloud Run: the `*.run.app` host).
-3. **Proxy status: Proxied** (orange cloud) so Cloudflare terminates SSL.
-4. **SSL/TLS → Overview → Full (strict)** so Cloudflare↔origin is encrypted
-   (both Fly and Cloud Run present valid certs on their `*.fly.dev` / `*.run.app`).
-5. Cloudflare proxies **WebSockets** by default — no extra setting needed; the
-   same-origin `wss://eoc.yourdomain.com/stream` rides through.
+**Done (2026-06-29): live at https://eoc.nryn.dev/** (Cloudflare-proxied, Full
+strict). The exact sequence used — follow it for any new hostname, because the
+grey→orange ordering matters with a Fly-issued cert:
+
+1. **Register the hostname with Fly** so Fly issues a real cert for it:
+   ```bash
+   fly certs add eoc.nryn.dev -a cerebro-eoc
+   ```
+2. **Add the DNS record** in Cloudflare → your domain → **DNS** → **CNAME**:
+   `eoc` → `cerebro-eoc.fly.dev`. A `CNAME` is the right choice (don't add the
+   `A`/`AAAA` Fly suggests — they're an *alternative*, not additive; Cloudflare
+   won't mix a CNAME with A records on the same name, and the shared `*.fly.dev`
+   IPv4 routes by hostname).
+3. **Start as "DNS only" (grey cloud).** Cloudflare's orange-cloud proxy
+   intercepts Fly's ACME HTTP-01 challenge, so the cert won't validate while
+   proxied. Keep it grey until issuance completes:
+   ```bash
+   fly certs show eoc.nryn.dev -a cerebro-eoc   # wait for Issued / Verified
+   ```
+4. **Flip to Proxied (orange cloud)** once the cert is issued.
+5. **SSL/TLS → Overview → Full (strict).** Do **not** use *Flexible* — with
+   `force_https=true` on the origin it causes an infinite redirect loop.
+6. Cloudflare proxies **WebSockets** by default — no extra setting; the
+   same-origin `wss://eoc.nryn.dev/stream` rides through.
 
 That's the only DNS record needed — UI, API, and WSS all ride the one origin.
+(Cloud Run later: same steps, CNAME target = the `*.run.app` host.)
 
 ---
 
@@ -274,7 +290,9 @@ That's the only DNS record needed — UI, API, and WSS all ride the one origin.
 - [ ] No CORS errors in the browser console (same origin).
 - [ ] **Cerebras**: text fan-out + vision (`/perception`) return real (non-mock) output.
 - [ ] **OpenRouter**: `POST /provider {"provider":"openrouter"}` switches live; text + vision both work; dropdown + logs reflect it via `/stream`.
-- [ ] Through Cloudflare (`eoc.yourdomain.com`): page + WSS both work end-to-end.
+- [x] Through Cloudflare (`eoc.nryn.dev`): HTTP 200 (no redirect loop), `/provider`
+      + `/state` live, served via Cloudflare (CF-RAY). Confirm WSS in a browser
+      (HUD shows **Live / Connected**).
 
 ---
 

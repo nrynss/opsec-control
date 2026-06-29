@@ -313,8 +313,10 @@ serves a fully-replayed snapshot ✅; `/agents` shows real (non-mock) COPs ✅.
 Confirm in a browser too: page loads **Live / Connected**, provider dropdown flips,
 a preset button fires a real fan-out.
 
-**Still pending:** Cloudflare custom domain (CNAME → `cerebro-eoc.fly.dev`,
-proxied, Full(strict)) — see [`hosting.md`](hosting.md) §5.
+**Custom domain (2026-06-29): ✅ live at https://eoc.nryn.dev/** — Cloudflare
+CNAME → `cerebro-eoc.fly.dev`, proxied, Full(strict); Fly-issued cert via
+`fly certs add`. Verified: HTTP 200 (no redirect loop), live (non-mock), served
+through Cloudflare. The grey→orange sequence is in [`hosting.md`](hosting.md) §5.
 
 ### Deploy decision (2026-06-29): single-origin on Fly.io (Cloud Run later)
 Per [`hosting.md`](hosting.md): **one Go container serves both the static
