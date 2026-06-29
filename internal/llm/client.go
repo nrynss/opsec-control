@@ -40,9 +40,9 @@ type Client struct {
 	providerMu sync.RWMutex
 
 	// Provider-specific config, loaded from env at construction.
-	cerebrasKey   string
-	cerebrasURL   string
-	cerebrasModel string
+	cerebrasKey     string
+	cerebrasURL     string
+	cerebrasModel   string
 	openrouterKey   string
 	openrouterURL   string
 	openrouterModel string
@@ -52,7 +52,7 @@ type Client struct {
 type Provider string
 
 const (
-	ProviderCerebras  Provider = "cerebras"
+	ProviderCerebras   Provider = "cerebras"
 	ProviderOpenRouter Provider = "openrouter"
 )
 
@@ -187,15 +187,15 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		apiKey:  activeKey,
-		baseURL: activeURL,
-		model:   activeModel,
-		client:  httpClient,
+		apiKey:         activeKey,
+		baseURL:        activeURL,
+		model:          activeModel,
+		client:         httpClient,
 		maxRetries:     maxRetries,
 		backoff:        backoff,
 		maxConcurrency: maxConcurrency,
-		sem:    sem,
-		rand:   r,
+		sem:            sem,
+		rand:           r,
 
 		provider:        cfg.Provider,
 		cerebrasKey:     cerebrasKey,
@@ -295,6 +295,36 @@ func setAdditionalProperties(val any) any {
 	return m
 }
 
+// extractJSON pulls a JSON value out of a model response that may be wrapped in
+// a Markdown code fence and/or surrounded by prose. It unwraps a ```json ... ```
+// fence if present, then narrows to the outermost {...} or [...] span so that
+// leading/trailing commentary (e.g. gemma's "**Assessment**" preamble) is
+// dropped. Cerebras structured output is already clean JSON, so this is a no-op
+// there; it only rescues looser OpenRouter-proxied models.
+func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+	// Unwrap a Markdown code fence if present.
+	if idx := strings.Index(s, "```"); idx >= 0 {
+		s = s[idx+3:]
+		// Drop an optional language tag on the opening fence line (e.g. "json"),
+		// but only when that first line carries no JSON bracket itself.
+		if nl := strings.IndexByte(s, '\n'); nl >= 0 && !strings.ContainsAny(s[:nl], "[{") {
+			s = s[nl+1:]
+		}
+		if end := strings.Index(s, "```"); end >= 0 {
+			s = s[:end]
+		}
+		s = strings.TrimSpace(s)
+	}
+	// Narrow to the outermost JSON object/array span to drop surrounding prose.
+	if start := strings.IndexAny(s, "{["); start >= 0 {
+		if end := strings.LastIndexAny(s, "}]"); end > start {
+			s = s[start : end+1]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -378,7 +408,7 @@ func parseRetryAfter(header string, now time.Time) (time.Duration, bool) {
 func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (contracts.LLMResponse, error) {
 	// Snapshot active provider config atomically to avoid data races with
 	// concurrent SetProvider calls.
-	provider, apiKey, baseURL, model := c.configSnapshot()
+	_, apiKey, baseURL, model := c.configSnapshot()
 
 	methodStartTime := time.Now()
 	messages := make([]chatMessage, 0, 2)
@@ -392,10 +422,11 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 		Messages: messages,
 	}
 
-	// response_format with json_schema + strict is Cerebras-specific.
-	// OpenRouter proxies many models — some don't support it. Drop response_format
-	// for OpenRouter and rely on the system prompt to request JSON output.
-	if len(req.Schema) > 0 && provider == ProviderCerebras {
+	// Request structured json_schema output. Both Cerebras and OpenRouter (for the
+	// Gemma family we use) honor response_format; without it OpenRouter models
+	// return prose/Markdown that fails JSON parsing. extractJSON below is the
+	// safety net for any model that still wraps the payload.
+	if len(req.Schema) > 0 {
 		cleanedSchema := ensureAdditionalPropertiesFalse(req.Schema)
 		apiReqPayload.ResponseFormat = &responseFormat{
 			Type: "json_schema",
@@ -522,6 +553,13 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 	}
 
 	completionContent := apiResp.Choices[0].Message.Content
+	// When a JSON schema was requested, the caller expects parseable JSON. Some
+	// OpenRouter models wrap it in a Markdown code fence (response_format is
+	// dropped for non-Cerebras providers), so strip any fence here. No-op for
+	// fence-free Cerebras structured output.
+	if len(req.Schema) > 0 {
+		completionContent = extractJSON(completionContent)
+	}
 	tokensIn := apiResp.Usage.PromptTokens
 	tokensOut := apiResp.Usage.CompletionTokens
 

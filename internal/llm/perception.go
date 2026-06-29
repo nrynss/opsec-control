@@ -101,7 +101,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 }
 
 func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) ([]contracts.Event, error) {
-	systemPrompt := "You are an EOC Multimodal Perception Agent. Analyze the aerial drone/satellite image and identify any structural collapses, bridge blockages, fires, or flooding. Output a JSON array of events."
+	systemPrompt := "You are an EOC Multimodal Perception Agent. Analyze the aerial drone/satellite image and identify any structural collapses, bridge blockages, fires, or flooding. Respond with ONLY a JSON object of the form {\"events\": [{\"type\": string, \"confidence\": number, \"payload\": object}]}. No prose, no Markdown."
 
 	// Snapshot active provider config atomically to avoid data races with
 	// concurrent SetProvider calls.
@@ -115,17 +115,35 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 	}
 	dataURI := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Data)
 
+	// Cerebras structured output requires a top-level OBJECT schema (a top-level
+	// array is rejected: "Extra top level keys found in JSON schema: {'items'}").
+	// Wrap the events array in an object; the parser below tolerates both this
+	// {"events":[...]} shape and a bare [...] array (what fence-free providers return).
 	schema := json.RawMessage(`{
-		"type": "array",
-		"items": {
-			"type": "object",
-			"properties": {
-				"type": { "type": "string" },
-				"confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-				"payload": { "type": "object" }
-			},
-			"required": ["type", "confidence"]
-		}
+		"type": "object",
+		"properties": {
+			"events": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"type": { "type": "string" },
+						"confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+						"payload": {
+							"type": "object",
+							"properties": {
+								"sector": { "type": "string" },
+								"bridgeId": { "type": "string" },
+								"roadId": { "type": "string" },
+								"note": { "type": "string" }
+							}
+						}
+					},
+					"required": ["type", "confidence"]
+				}
+			}
+		},
+		"required": ["events"]
 	}`)
 
 	type contentPart struct {
@@ -148,7 +166,7 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 	}
 
 	apiReqPayload := visionRequest{
-		Model:    visionModel,
+		Model: visionModel,
 		Messages: []visionMessage{
 			{
 				Role: "user",
@@ -226,14 +244,25 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 		return nil, fmt.Errorf("empty choices in API response")
 	}
 
-	var rawEvents []struct {
+	type rawEvent struct {
 		Type       string          `json:"type"`
 		Confidence float64         `json:"confidence"`
 		Payload    json.RawMessage `json:"payload"`
 	}
 
-	if err := json.Unmarshal([]byte(apiResp.Choices[0].Message.Content), &rawEvents); err != nil {
-		return nil, fmt.Errorf("unmarshal perception output: %w", err)
+	// Some OpenRouter models wrap JSON in a ```json fence or prose; extract it.
+	content := extractJSON(apiResp.Choices[0].Message.Content)
+
+	// Accept both a bare array [...] and the object-wrapped {"events":[...]} shape.
+	var rawEvents []rawEvent
+	if err := json.Unmarshal([]byte(content), &rawEvents); err != nil {
+		var wrapper struct {
+			Events []rawEvent `json:"events"`
+		}
+		if err2 := json.Unmarshal([]byte(content), &wrapper); err2 != nil {
+			return nil, fmt.Errorf("unmarshal perception output: %w (content: %.200s)", err, content)
+		}
+		rawEvents = wrapper.Events
 	}
 
 	h := sha256.New()
@@ -300,8 +329,12 @@ var eventTypeNormalizationMap = func() map[string]contracts.EventType {
 	// Add specific common aliases/abbreviations
 	m["leveebreach"] = contracts.EventLeveeBreached
 	m["bridgecollapse"] = contracts.EventBridgeCollapsed
+	m["bridgeblockage"] = contracts.EventBridgeCollapsed
 	m["buildingcollapse"] = contracts.EventBuildingCollapsed
 	m["roadblock"] = contracts.EventRoadBlocked
+	m["fire"] = contracts.EventFireIgnited
+	m["flood"] = contracts.EventFloodExtentUpdated
+	m["flooding"] = contracts.EventFloodExtentUpdated
 	m["gasleak"] = contracts.EventGasLeakDetected
 	m["watermainbreakage"] = contracts.EventWaterMainBreak
 	m["waterbreak"] = contracts.EventWaterMainBreak

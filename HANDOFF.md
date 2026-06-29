@@ -202,7 +202,41 @@ To claim: change the cell to 🔵 with your builder name + date in the same comm
 | **P13** | ✅ **Done** — Antigravity Builder (2026-06-29) | `web/` | UI layout fixes: Make map smaller (too big currently). Enlarge data point areas (HUD metrics, panels, timeline, matrix, commander). | — (independent of P9–P12; see task doc) |
 | **P14** | ✅ **Done** — Antigravity Builder (2026-06-29) | `web/` | Make timeline, matrix feed, logs hold full history + proper scrolling (instead of refresh/overwrite). **Decision: everything accumulates** — feeds + Commander COP + specialist Cell outputs all become scrolling histories. | — (independent of P9–P12; see task doc) |
 | **P15** | ⬜ **Unclaimed** | `web/` | Additional UI polish: improve controls, badges, perception panel, live vs demo clarity, general layout/responsiveness. | P14 |
-| **P16** | 🔵 **Claimed — Claude Builder (2026-06-29)** | deploy/build + docs | Document OPENROUTER_* in .env.example + hosting.md. Update any deploy notes for dual providers. Validate both providers work for text + vision. | P8, P9 |
+| **P16** | ✅ **Done — Claude Builder (2026-06-29)** | deploy/build + docs | Docs ✅ (OPENROUTER_* in .env.example; hosting.md §4.1). **Live validation: 2×2 matrix all-green** (Cerebras + OpenRouter, text + vision) after the **P17** `internal/llm` fixes landed. | P8, P9, **P17** |
+| **P17** | ✅ **Done — Claude Builder (2026-06-29)** | `internal/llm` | Fix dual-provider bugs found by P16 validation (see findings below): object-wrapped perception schema, `extractJSON` fence/prose stripping, `response_format` sent for OpenRouter too, vision event-type aliases. All providers green for text + vision. | P9 |
+
+### P16 validation findings + P17 fixes (2026-06-29, live keys)
+Ran `cmd/eoc` against real Cerebras + OpenRouter keys (scenario replay = text;
+`POST /perception` with a real PNG = vision; runtime `POST /provider` switch).
+Connectivity sanity-checked per-model with raw `chat/completions` curls (gemma +
+deepseek): gemma text/vision both respond, but **wrap JSON in ```json fences /
+prose**; Cerebras returns clean JSON.
+
+**Before P17** — only 1/4 quadrants worked:
+
+| | Cerebras | OpenRouter |
+|---|---|---|
+| **Text** | ✅ | ❌ prose/markdown fails schema validation (`response_format` was dropped for OpenRouter) |
+| **Vision** | ❌ `response_format` schema rejected | ❌ markdown-fenced JSON not stripped |
+
+**After P17 — all green:** Cerebras text/vision ✅, OpenRouter text/vision ✅
+(OpenRouter ~15s/fan-out, slower than Cerebras but reliable, no timeouts).
+
+**P17 fixes (`internal/llm`, no contract change):**
+1. **Cerebras vision schema** ([`perception.go`](internal/llm/perception.go)) — wrapped the
+   top-level array in an **object** `{"events":[…]}` (Cerebras rejects top-level
+   `items`); gave `payload` explicit properties (Cerebras strict needs object
+   `properties`). Parser tolerates both `{"events":[…]}` and a bare `[…]`.
+2. **`extractJSON`** ([`client.go`](internal/llm/client.go)) — strips ```` ```json ```` fences
+   **and** narrows to the outermost `{…}`/`[…]` span (drops gemma's prose preamble).
+   Applied to the cell-text path and perception. Safety net even with (1)/(3).
+3. **`response_format` for OpenRouter too** ([`client.go`](internal/llm/client.go)) — removed
+   the Cerebras-only gate; without structured output gemma returns prose. OpenRouter
+   honors json_schema for the Gemma family, so cells now get clean JSON.
+4. **Vision event-type aliases** ([`perception.go`](internal/llm/perception.go)) — `fire`→
+   FireIgnited, `flood`/`flooding`→FloodExtentUpdated, `bridgeblockage`→BridgeCollapsed.
+
+Tracked as **P17** (✅ Done). `go test ./...` + `contracttest` green; gofmt/vet clean.
 
 ### Deploy decision (2026-06-29): single-origin
 Per [`hosting.md`](hosting.md): **one Go container serves both the static
