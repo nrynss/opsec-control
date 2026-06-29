@@ -10,11 +10,17 @@
   var thumbnail = null;
   var fileInput;
 
-  // Preset triggers for quick MVD mock testing
+  // Preset triggers inject a real event onto the bus (POST /events), which the
+  // reasoning loop classifies → fans out → COP. (These are NOT image uploads;
+  // the simulation datastream is the primary driver — this is a manual nudge.)
+  // Chosen to fire cleanly from the post-replay end-state: seismic events wake
+  // the full roster and are never illegal; bridge/building collapses wake
+  // Infra+Intel. Avoid LeveeBreached — the scenario already breaches it, so a
+  // repeat is an illegal transition.
   var presets = [
-    { name: "Vora Bridge Collapse", data: "drone_vora_bridge_collapsed.png", source: "drone" },
-    { name: "Highgate Collapse", data: "satellite_highgate_masonry_collapse.png", source: "satellite" },
-    { name: "Southport Levee Breach", data: "drone_southport_levee_breach.png", source: "drone" }
+    { name: "Aftershock (M5.5)", type: "AftershockOccurred", payload: { magnitude: 5.5 } },
+    { name: "Vora Bridge Collapse", type: "BridgeCollapsed", payload: { bridgeId: "B-VORA" } },
+    { name: "Highgate Building Collapse", type: "BuildingCollapsed", payload: { sector: "S-HIGHGATE" } }
   ];
 
   function handleDrag(e) {
@@ -131,18 +137,27 @@
     }
   }
 
-  // Preset upload triggers a small text file post mimicking the PNG trigger content
+  // Preset injects a real event onto the bus via POST /events. Timestamp is
+  // omitted (0); the server stamps it to the live world time at apply time, so
+  // it stays monotonic-valid no matter where the scenario replay has reached.
   async function triggerPreset(preset) {
     uploadState = "uploading";
-    statusMessage = `Activating ${preset.name}...`;
+    statusMessage = `Injecting ${preset.name}...`;
     thumbnail = null;
     dispatch('uploading');
 
     try {
-      var res = await fetch(`/perception?source=${preset.source}`, {
+      var ev = {
+        id: `preset-${preset.type}-${Date.now()}`,
+        type: preset.type,
+        confidence: 0.97,
+        source: "operator-preset",
+        payload: preset.payload
+      };
+      var res = await fetch("/events", {
         method: "POST",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: preset.data
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ev)
       });
 
       if (!res.ok) {
@@ -150,15 +165,14 @@
         throw new Error(errText || `Server error ${res.status}`);
       }
 
-      var data = await res.json();
       uploadState = "analyzing";
-      statusMessage = "Vision cells perceiving...";
-      
+      statusMessage = "Cells reasoning over injected event...";
+
       setTimeout(() => {
         uploadState = "success";
-        statusMessage = "Events published successfully!";
-        dispatch('events', data.events || []);
-        
+        statusMessage = `Injected ${preset.name}.`;
+        dispatch('events', [ev]);
+
         setTimeout(() => {
           if (uploadState === "success") {
             uploadState = "idle";

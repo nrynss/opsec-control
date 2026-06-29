@@ -147,6 +147,10 @@ func (s *Server) handlePostEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad event", http.StatusBadRequest)
 		return
 	}
+	// A manually-injected event (e.g. a dashboard preset trigger) may omit the
+	// timestamp (0). It is stamped to the live world time at apply time by the
+	// reasoning loop (cmd/eoc handle), which keeps it monotonic-valid regardless
+	// of where the scenario replay has advanced to.
 	s.bus.Publish(ev)
 	w.WriteHeader(http.StatusAccepted)
 }

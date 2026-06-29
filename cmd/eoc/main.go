@@ -65,7 +65,7 @@ type providerAdapter struct {
 	client *llm.Client
 }
 
-func (a *providerAdapter) Provider() string { return string(a.client.Provider()) }
+func (a *providerAdapter) Provider() string     { return string(a.client.Provider()) }
 func (a *providerAdapter) SetProvider(p string) { a.client.SetProvider(llm.Provider(p)) }
 
 // app holds the wired dependencies for the reasoning loop.
@@ -81,6 +81,14 @@ type app struct {
 // non-ambient event that wakes at least one specialist — run the parallel fan-out
 // and broadcast the resulting COP. Returns true if a fan-out occurred.
 func (a *app) handle(ctx context.Context, ev contracts.Event) bool {
+	// Live-injected events (e.g. dashboard preset triggers via POST /events)
+	// arrive with Timestamp 0. Stamp them to the current world time at apply
+	// time so they satisfy Apply's temporal-monotonicity rule (§14.2) no matter
+	// how far the scenario replay has advanced. Scenario events carry real
+	// timestamps and are untouched (the t=0 first event stays 0 — a no-op here).
+	if ev.Timestamp == 0 {
+		ev.Timestamp = a.store.Snapshot().Time
+	}
 	if _, err := a.store.Apply(ev); err != nil {
 		// Rejections are expected and harmless (§14.2) — log and skip.
 		log.Printf("[eoc] event %s (%s) rejected: %v", ev.ID, ev.Type, err)
