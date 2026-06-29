@@ -4,7 +4,9 @@
 
   export var state = {};
   export var metrics = {};
-  export var demoMode = true;
+  export var isDisconnected = true;
+  export var isInitialized = false;
+  export var stats = {};
   export var currentProvider = "cerebras";
   export var switchingProvider = false;
 
@@ -29,15 +31,20 @@
 <div class="hud-strip">
   <div class="hud-logo" style="display: flex; align-items: center; gap: 8px;">
     <span style="font-weight: 800; letter-spacing: 0.05rem;">CEREBRO EOC</span>
-    {#if demoMode}
-      <span class="hud-badge demo" title="Running in simulated offline/demo mode loop">
-        <span class="pulse-dot demo-dot"></span>
-        OFFLINE / DEMO
+    {#if isDisconnected}
+      <span class="hud-badge demo badge-disconnected" title="WebSocket connection lost. Attempting to reconnect...">
+        <span class="pulse-dot demo-dot dot-disconnected"></span>
+        DISCONNECTED / RECONNECTING...
       </span>
     {:else}
       <span class="hud-badge live" title="Connected to EOC live websocket feed">
         <span class="pulse-dot live-dot"></span>
         LIVE / CONNECTED
+      </span>
+    {/if}
+    {#if stats && stats.status === 'complete'}
+      <span class="hud-badge live badge-complete" title="Disaster simulation run completed">
+        COMPLETE
       </span>
     {/if}
   </div>
@@ -152,6 +159,22 @@
   .provider-select option {
     background: #0d111e;
     color: #f1f5f9;
+  }
+
+  :global(.badge-disconnected) {
+    background: rgba(255, 51, 51, 0.15) !important;
+    border-color: rgba(255, 51, 51, 0.4) !important;
+    color: #ff3333 !important;
+  }
+  :global(.dot-disconnected) {
+    background: #ff3333 !important;
+    box-shadow: 0 0 8px #ff3333 !important;
+  }
+  :global(.badge-complete) {
+    background: rgba(0, 255, 135, 0.15) !important;
+    border-color: rgba(0, 255, 135, 0.4) !important;
+    color: #00ff87 !important;
+    margin-left: 6px;
   }
 </style>
 

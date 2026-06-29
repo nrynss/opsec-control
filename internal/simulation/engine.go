@@ -3,6 +3,7 @@ package simulation
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -112,7 +113,7 @@ func (e *Engine) Reset() {
 	}
 	e.idx = 0
 	e.current = 0
-	e.paused = false
+	e.paused = true
 	e.resumeCh = nil
 	e.wallStart = time.Time{}
 	e.wallElapsed = 0
@@ -231,14 +232,18 @@ func (e *Engine) Run(ctx context.Context) error {
 		// Check for pause.
 		e.mu.Lock()
 		paused := e.paused
-		resCh := e.resumeCh
 		e.mu.Unlock()
 
 		if paused {
 			e.mu.Lock()
 			e.updateWallLocked()
+			if e.resumeCh == nil {
+				e.resumeCh = make(chan struct{})
+			}
+			resCh := e.resumeCh
+			resetCh := e.resetCh
 			e.mu.Unlock()
-			resetCh := e.getResetCh()
+
 			select {
 			case <-resCh:
 			case <-ctx.Done():
@@ -253,8 +258,16 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.mu.Lock()
 		if e.scenario == nil || e.idx >= len(e.scenario.Events) {
 			e.updateWallLocked()
+			resetCh := e.resetCh
 			e.mu.Unlock()
-			return nil
+
+			// Park here, waiting for Reset/Load or context cancel
+			select {
+			case <-resetCh:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 		nextIdx := e.idx
 		nextEv := e.scenario.Events[nextIdx]
@@ -266,16 +279,18 @@ func (e *Engine) Run(ctx context.Context) error {
 
 		waitedForTime := true
 		if delta > 0 && sp > 0 {
-			sleep := time.Duration(delta/sp) * time.Second
+			sleep := time.Duration((delta / sp) * float64(time.Second))
+			log.Printf("[sim] Sleeping for %v (delta=%v, sp=%v, idx=%d)", sleep, delta, sp, nextIdx)
 			timer := time.NewTimer(sleep)
 			select {
 			case <-timer.C:
-				// normal time to publish nextEv (if still valid)
+				log.Printf("[sim] Sleep complete for idx=%d", nextIdx)
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
 			case <-resetCh:
 				timer.Stop()
+				log.Printf("[sim] Sleep interrupted by reset for idx=%d", nextIdx)
 				waitedForTime = false
 				// A Reset or Load happened. Do not publish the old event.
 			}
@@ -297,6 +312,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.idx++
 		e.mu.Unlock()
 
+		log.Printf("[sim] Publishing event idx=%d, type=%s, timestamp=%d", nextIdx, ev.Type, ev.Timestamp)
 		e.bus.Publish(ev)
 	}
 }
