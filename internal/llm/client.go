@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
@@ -38,6 +39,11 @@ type Client struct {
 	// Multi-provider support (P9).
 	provider   Provider
 	providerMu sync.RWMutex
+
+	// LLM telemetry counters (P21) — thread-safe, track cumulative usage for stats.
+	tokensIn     atomic.Int64
+	tokensOut    atomic.Int64
+	requestCount atomic.Int64
 
 	// Provider-specific config, loaded from env at construction.
 	cerebrasKey     string
@@ -242,6 +248,33 @@ func (c *Client) configSnapshot() (provider Provider, apiKey, baseURL, model str
 	c.providerMu.RLock()
 	defer c.providerMu.RUnlock()
 	return c.provider, c.apiKey, c.baseURL, c.model
+}
+
+// --- P21: Token stats (contracts.TokenStatsProvider) ---
+
+// TotalTokens returns cumulative tokens in and out across all completions + perceptions.
+func (c *Client) TotalTokens() (in, out int) {
+	return int(c.tokensIn.Load()), int(c.tokensOut.Load())
+}
+
+// TotalRequests returns the total number of LLM calls (completions + interpretations).
+func (c *Client) TotalRequests() int {
+	return int(c.requestCount.Load())
+}
+
+// ResetStats clears the token and request counters (for All Clear).
+// Safe for concurrent use with ongoing completions.
+func (c *Client) ResetStats() {
+	c.tokensIn.Store(0)
+	c.tokensOut.Store(0)
+	c.requestCount.Store(0)
+}
+
+// recordStats increments the atomic counters for a completion response.
+func (c *Client) recordStats(tokensIn, tokensOut int) {
+	c.tokensIn.Add(int64(tokensIn))
+	c.tokensOut.Add(int64(tokensOut))
+	c.requestCount.Add(1)
 }
 
 // Complete executes a prompt completion against the active provider (or runs Mock
@@ -572,6 +605,9 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 		tokensPerSec = float64(tokensOut) / duration.Seconds()
 	}
 
+	// Record stats for the token counters (P21).
+	c.recordStats(tokensIn, tokensOut)
+
 	return contracts.LLMResponse{
 		Content:      completionContent,
 		TokensIn:     tokensIn,
@@ -733,6 +769,9 @@ func (c *Client) completeMock(ctx context.Context, req contracts.LLMRequest) (co
 		return contracts.LLMResponse{}, ctx.Err()
 	case <-time.After(simulatedDuration):
 	}
+
+	// Record stats for the token counters (P21).
+	c.recordStats(tokensIn, tokensOut)
 
 	return contracts.LLMResponse{
 		Content:      content,
