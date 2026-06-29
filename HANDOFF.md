@@ -238,13 +238,25 @@ prose**; Cerebras returns clean JSON.
 
 Tracked as **P17** (✅ Done). `go test ./...` + `contracttest` green; gofmt/vet clean.
 
-### Deploy decision (2026-06-29): single-origin
+### Deploy decision (2026-06-29): single-origin on Fly.io (Cloud Run later)
 Per [`hosting.md`](hosting.md): **one Go container serves both the static
-dashboard (`web/dist`) and the API/WS**, fronted by Cloudflare. Chosen because the
-frontend is hard-coded **same-origin** (WS `wss://<page-host>/stream`, relative
-`fetch("/state")`); a two-subdomain split would silently drop the live demo to
-offline demo mode and would need CORS the API doesn't have. Single-origin removes
-CORS, removes the Cloudflare-Pages target, and matches the code unchanged.
+dashboard (`web/dist`) and the API/WS**, fronted by Cloudflare. Single-origin
+because the frontend is hard-coded **same-origin** (WS `wss://<page-host>/stream`,
+relative `fetch("/state")`); a two-subdomain split would silently drop the live
+demo to offline demo mode and would need CORS the API doesn't have.
+
+**Target: Fly.io now** (7-day trial, fastest single-always-on-container path),
+**Cloud Run later** — same OCI image, so migration is cheap (move 2 secrets,
+repoint the Cloudflare CNAME; Cloud Run recipe kept in `hosting.md` §7). Both
+providers shipped switchable (boot Cerebras → live-switch to OpenRouter).
+
+**⚠️ Single-instance rule (every platform):** world state is in-memory
+([`internal/state`](internal/state)) + pushed over WS, and the scenario replays
+per-process → must run **exactly one instance** (Fly `fly scale count 1` +
+`auto_stop_machines=false`; Cloud Run `--max/min-instances 1`). No HA by design.
+`.dockerignore` now excludes `.env*` (keys out of build layers). `fly.toml`
+hardening (no auto-stop, restart=always, `/state` health check, US region) is in
+`hosting.md` §4.1.
 
 ### Landed (2026-06-29): Westbank → Westside display rename
 Sector/clinic/road **display names** renamed `Westbank` → `Westside` across `web/`,

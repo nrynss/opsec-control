@@ -14,3 +14,6 @@ dist/
 *.md
 reviews/
 obsolete/
+# Keep secrets out of build layers (the COPY . . go-build stage)
+.env
+.env.*
