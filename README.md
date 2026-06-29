@@ -10,7 +10,7 @@ The site loads directly into the **Common Operational Picture (COP)** dashboard 
 
 ### 📺 Watch the Demo
 
-**[▶ Demo video](#)** <!-- TODO: replace # with the published video URL -->
+**[▶ Demo video](https://www.youtube.com/watch?v=mJGG5flHZTs)** · **[𝕏 Thread](https://x.com/nrynssnryn/status/2071635727323132005)**
 
 The video runs the full `cerebro-cascade` scenario on both backends. On **Cerebras**, the six Cells reason and the Commander synthesizes a complete COP in **seconds**. On a **conventional GPU provider (OpenRouter)**, the *same model on the same prompts* takes **minutes** — so that run is cut, and we show the final screenshot to confirm the answer is equivalent. The difference you see is purely the inference backend.
 
