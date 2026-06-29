@@ -631,3 +631,169 @@ func TestContextCancellationMidBackoff(t *testing.T) {
 		t.Fatal("cancellation did not return promptly during backoff sleep")
 	}
 }
+
+// --- P9: multi-provider tests ---
+
+func TestNewClientDefaultProvider(t *testing.T) {
+	c := NewClient(Config{})
+	if c.Provider() != ProviderCerebras {
+		t.Errorf("expected default provider cerebras, got %s", c.Provider())
+	}
+}
+
+func TestNewClientExplicitProvider(t *testing.T) {
+	c := NewClient(Config{Provider: ProviderOpenRouter})
+	if c.Provider() != ProviderOpenRouter {
+		t.Errorf("expected openrouter, got %s", c.Provider())
+	}
+	// Legacy fields should reflect OpenRouter config.
+	if c.baseURL != "https://openrouter.ai/api/v1" {
+		t.Errorf("expected openrouter baseURL, got %s", c.baseURL)
+	}
+}
+
+func TestSetProviderSwitchAtRuntime(t *testing.T) {
+	c := NewClient(Config{
+		APIKey:  "cerebras-key",
+		BaseURL: "https://cerebras.test/v1",
+		Model:   "gemma-4-31b",
+	})
+	if c.Provider() != ProviderCerebras {
+		t.Fatalf("expected cerebras, got %s", c.Provider())
+	}
+
+	// Switch to OpenRouter.
+	c.SetProvider(ProviderOpenRouter)
+	if c.Provider() != ProviderOpenRouter {
+		t.Fatalf("expected openrouter after switch, got %s", c.Provider())
+	}
+	if c.apiKey != c.openrouterKey {
+		t.Errorf("apiKey not switched to openrouter key")
+	}
+	if c.baseURL != c.openrouterURL {
+		t.Errorf("baseURL not switched to openrouter URL")
+	}
+	if c.model != c.openrouterModel {
+		t.Errorf("model not switched to openrouter model")
+	}
+
+	// Switch back.
+	c.SetProvider(ProviderCerebras)
+	if c.Provider() != ProviderCerebras {
+		t.Fatalf("expected cerebras after switch-back, got %s", c.Provider())
+	}
+	if c.apiKey != c.cerebrasKey {
+		t.Errorf("apiKey not restored to cerebras key")
+	}
+}
+
+func TestSetProviderNoop(t *testing.T) {
+	c := NewClient(Config{Provider: ProviderCerebras, APIKey: "orig-key"})
+	c.SetProvider(ProviderCerebras) // no-op
+	if c.apiKey != "orig-key" {
+		t.Errorf("apiKey changed on no-op SetProvider")
+	}
+}
+
+func TestOpenRouterEnvConfig(t *testing.T) {
+	os.Setenv("OPENROUTER_API_KEY", "or-key")
+	os.Setenv("OPENROUTER_BASE_URL", "https://or.test/v1")
+	os.Setenv("OPENROUTER_MODEL", "or-model")
+	defer func() {
+		os.Unsetenv("OPENROUTER_API_KEY")
+		os.Unsetenv("OPENROUTER_BASE_URL")
+		os.Unsetenv("OPENROUTER_MODEL")
+	}()
+
+	c := NewClient(Config{Provider: ProviderOpenRouter})
+	if c.openrouterKey != "or-key" {
+		t.Errorf("expected or-key, got %s", c.openrouterKey)
+	}
+	if c.openrouterURL != "https://or.test/v1" {
+		t.Errorf("expected or URL, got %s", c.openrouterURL)
+	}
+	if c.openrouterModel != "or-model" {
+		t.Errorf("expected or-model, got %s", c.openrouterModel)
+	}
+	// Active fields should match.
+	if c.apiKey != "or-key" {
+		t.Errorf("active apiKey should be or-key, got %s", c.apiKey)
+	}
+}
+
+func TestConfigOverrideForProvider(t *testing.T) {
+	// When Config APIKey/BaseURL/Model are set, they override env for the active provider.
+	c := NewClient(Config{
+		Provider: ProviderOpenRouter,
+		APIKey:   "cfg-key",
+		BaseURL:  "https://cfg.test/v1",
+		Model:    "cfg-model",
+	})
+	if c.apiKey != "cfg-key" {
+		t.Errorf("expected cfg-key, got %s", c.apiKey)
+	}
+	if c.baseURL != "https://cfg.test/v1" {
+		t.Errorf("expected cfg URL, got %s", c.baseURL)
+	}
+	if c.model != "cfg-model" {
+		t.Errorf("expected cfg-model, got %s", c.model)
+	}
+}
+
+func TestCompleteUsesActiveProviderURLAndAuth(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	var sawAuth, sawURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		sawURL = r.URL.String()
+
+		resp := chatCompletionResponse{
+			Choices: []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}{{Message: struct {
+				Content string `json:"content"`
+			}{Content: "ok"}}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	c := NewClient(Config{
+		Provider: ProviderOpenRouter,
+		APIKey:   "or-test-key",
+		BaseURL:  server.URL,
+	})
+
+	_, err := c.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+
+	if sawAuth != "Bearer or-test-key" {
+		t.Errorf("expected Authorization 'Bearer or-test-key', got %q", sawAuth)
+	}
+	if sawURL != "/chat/completions" {
+		t.Errorf("expected /chat/completions, got %q", sawURL)
+	}
+}
+
+func TestMockModeIndependentOfProvider(t *testing.T) {
+	os.Setenv("LLM_MOCK", "true")
+	defer os.Unsetenv("LLM_MOCK")
+
+	c := NewClient(Config{Provider: ProviderOpenRouter})
+	resp, err := c.Complete(context.Background(), contracts.LLMRequest{
+		System: "You are the Infrastructure cell",
+		User:   "Identify damage for stateVersion: 1",
+	})
+	if err != nil {
+		t.Fatalf("mock Complete failed: %v", err)
+	}
+	if !strings.Contains(resp.Content, `"agent": "Infrastructure"`) {
+		t.Errorf("mock response should contain Infrastructure agent marker, got: %s", resp.Content)
+	}
+}

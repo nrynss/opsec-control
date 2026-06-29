@@ -1,11 +1,15 @@
-// Package llm is the Cerebras client (Gemma 4 31B) behind the contracts.LLMClient
-// interface, plus the throughput/latency metrics surfaced on the HUD (SPEC §16.1,
-// §15.1).
+// Package llm is the LLM client supporting multiple providers (Cerebras, OpenRouter)
+// behind the contracts.LLMClient and contracts.Perception interfaces, plus the
+// throughput/latency metrics surfaced on the HUD (SPEC §16.1, §15.1).
 //
-// Owner: Antigravity Builder (llm lane claimed in HANDOFF.md).
-// Depends on: contracts/interfaces (LLMClient).
+// Owner: DeepSeek V4 Pro (P9 — took over from Antigravity Builder).
+// Depends on: contracts/interfaces (LLMClient, Perception).
 // Must NOT: own domain/operational logic; leak provider-specific types past the
 // interface boundary.
+//
+// Multi-provider support (P9):
+// The client supports runtime provider switching via SetProvider(). Provider-specific
+// config is loaded from CEREBRAS_* / OPENROUTER_* env vars at construction.
 //
 // Cerebras API Hard Constraints (Measured June 2026):
 // - Concurrency ceiling: 4 concurrent in-flight requests.

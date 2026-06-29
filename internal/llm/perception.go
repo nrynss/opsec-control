@@ -97,7 +97,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) ([]contracts.Event, error) {
 	systemPrompt := "You are an EOC Multimodal Perception Agent. Analyze the aerial drone/satellite image and identify any structural collapses, bridge blockages, fires, or flooding. Output a JSON array of events."
 
-	// Cerebras model for the hackathon (Gemma 4 31B is native multimodal)
+	// Active provider's model (resolved by SetProvider / NewClient).
 	visionModel := c.model
 
 	// Base64 encode the image data

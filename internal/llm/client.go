@@ -20,7 +20,9 @@ import (
 	"github.com/nrynss/opsec-control/internal/contracts"
 )
 
-// Client implements contracts.LLMClient using the Cerebras API.
+// Client implements contracts.LLMClient and contracts.Perception.
+// It supports multiple providers (Cerebras, OpenRouter) with a global
+// runtime-switchable provider.
 type Client struct {
 	apiKey         string
 	baseURL        string
@@ -32,9 +34,29 @@ type Client struct {
 	sem            chan struct{}
 	rand           *rand.Rand
 	randMu         sync.Mutex
+
+	// Multi-provider support (P9).
+	provider   Provider
+	providerMu sync.RWMutex
+
+	// Provider-specific config, loaded from env at construction.
+	cerebrasKey   string
+	cerebrasURL   string
+	cerebrasModel string
+	openrouterKey   string
+	openrouterURL   string
+	openrouterModel string
 }
 
-// Config holds configuration parameters for the Cerebras client.
+// Provider identifies the LLM backend (P9).
+type Provider string
+
+const (
+	ProviderCerebras  Provider = "cerebras"
+	ProviderOpenRouter Provider = "openrouter"
+)
+
+// Config holds configuration parameters for the LLM client.
 type Config struct {
 	APIKey         string
 	BaseURL        string
@@ -48,33 +70,69 @@ type Config struct {
 	// default seed is used; callers wanting reproducible-yet-varied jitter can
 	// derive this from the scenario seed.
 	Seed int64
+	// Provider selects the LLM backend (cerebras or openrouter).
+	// If empty, defaults to cerebras for backwards compatibility.
+	Provider Provider
 }
 
-// NewClient creates a new Cerebras LLM client.
+// NewClient creates a new LLM client supporting multiple providers (P9).
 // It loads settings from environment variables if Config fields are empty:
-// - CEREBRAS_API_KEY
-// - CEREBRAS_BASE_URL (defaults to https://api.cerebras.ai/v1)
-// - CEREBRAS_MODEL (defaults to gemma-4-31b)
+//
+//	Cerebras:  CEREBRAS_API_KEY / CEREBRAS_BASE_URL / CEREBRAS_MODEL
+//	OpenRouter: OPENROUTER_API_KEY / OPENROUTER_BASE_URL / OPENROUTER_MODEL
+//
+// Active provider is selected from Config.Provider (default: cerebras).
 func NewClient(cfg Config) *Client {
-	apiKey := cfg.APIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("CEREBRAS_API_KEY")
+	if cfg.Provider == "" {
+		cfg.Provider = ProviderCerebras
 	}
 
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = os.Getenv("CEREBRAS_BASE_URL")
+	// --- Cerebras defaults ---
+	cerebrasKey := os.Getenv("CEREBRAS_API_KEY")
+	cerebrasURL := os.Getenv("CEREBRAS_BASE_URL")
+	if cerebrasURL == "" {
+		cerebrasURL = "https://api.cerebras.ai/v1"
 	}
-	if baseURL == "" {
-		baseURL = "https://api.cerebras.ai/v1"
+	cerebrasModel := os.Getenv("CEREBRAS_MODEL")
+	if cerebrasModel == "" {
+		cerebrasModel = "gemma-4-31b"
 	}
 
-	model := cfg.Model
-	if model == "" {
-		model = os.Getenv("CEREBRAS_MODEL")
+	// --- OpenRouter defaults ---
+	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
+	openrouterURL := os.Getenv("OPENROUTER_BASE_URL")
+	if openrouterURL == "" {
+		openrouterURL = "https://openrouter.ai/api/v1"
 	}
-	if model == "" {
-		model = "gemma-4-31b"
+	openrouterModel := os.Getenv("OPENROUTER_MODEL")
+	if openrouterModel == "" {
+		openrouterModel = "google/gemma-3-27b-it"
+	}
+
+	// Override from explicit Config fields.
+	if cfg.APIKey != "" {
+		switch cfg.Provider {
+		case ProviderOpenRouter:
+			openrouterKey = cfg.APIKey
+		default:
+			cerebrasKey = cfg.APIKey
+		}
+	}
+	if cfg.BaseURL != "" {
+		switch cfg.Provider {
+		case ProviderOpenRouter:
+			openrouterURL = cfg.BaseURL
+		default:
+			cerebrasURL = cfg.BaseURL
+		}
+	}
+	if cfg.Model != "" {
+		switch cfg.Provider {
+		case ProviderOpenRouter:
+			openrouterModel = cfg.Model
+		default:
+			cerebrasModel = cfg.Model
+		}
 	}
 
 	httpClient := cfg.HTTPClient
@@ -110,16 +168,71 @@ func NewClient(cfg Config) *Client {
 	}
 	r := rand.New(rand.NewSource(seed))
 
+	// Resolve the active provider's key for mock-mode detection (Complete checks c.apiKey).
+	activeKey := cerebrasKey
+	if cfg.Provider == ProviderOpenRouter {
+		activeKey = openrouterKey
+	}
+
+	// Apply active provider fields to the legacy single-provider fields
+	// (used by Complete for mock-mode check, and by resolveProvider for the real path).
+	var activeURL, activeModel string
+	switch cfg.Provider {
+	case ProviderOpenRouter:
+		activeURL = openrouterURL
+		activeModel = openrouterModel
+	default:
+		activeURL = cerebrasURL
+		activeModel = cerebrasModel
+	}
+
 	return &Client{
-		apiKey:         apiKey,
-		baseURL:        baseURL,
-		model:          model,
-		client:         httpClient,
+		apiKey:  activeKey,
+		baseURL: activeURL,
+		model:   activeModel,
+		client:  httpClient,
 		maxRetries:     maxRetries,
 		backoff:        backoff,
 		maxConcurrency: maxConcurrency,
-		sem:            sem,
-		rand:           r,
+		sem:    sem,
+		rand:   r,
+
+		provider:        cfg.Provider,
+		cerebrasKey:     cerebrasKey,
+		cerebrasURL:     cerebrasURL,
+		cerebrasModel:   cerebrasModel,
+		openrouterKey:   openrouterKey,
+		openrouterURL:   openrouterURL,
+		openrouterModel: openrouterModel,
+	}
+}
+
+// Provider returns the currently active provider (P9).
+// Safe for concurrent use.
+func (c *Client) Provider() Provider {
+	c.providerMu.RLock()
+	defer c.providerMu.RUnlock()
+	return c.provider
+}
+
+// SetProvider switches the active provider at runtime (P9).
+// Safe for concurrent use. No-op if same provider.
+func (c *Client) SetProvider(p Provider) {
+	c.providerMu.Lock()
+	defer c.providerMu.Unlock()
+	if c.provider == p {
+		return
+	}
+	c.provider = p
+	switch p {
+	case ProviderOpenRouter:
+		c.apiKey = c.openrouterKey
+		c.baseURL = c.openrouterURL
+		c.model = c.openrouterModel
+	default:
+		c.apiKey = c.cerebrasKey
+		c.baseURL = c.cerebrasURL
+		c.model = c.cerebrasModel
 	}
 }
 

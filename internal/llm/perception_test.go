@@ -104,3 +104,22 @@ func TestNormalizeEventType(t *testing.T) {
 		}
 	}
 }
+
+func TestPerceptionMockOpenRouterProvider(t *testing.T) {
+	t.Setenv("LLM_MOCK", "true")
+	client := NewClient(Config{Provider: ProviderOpenRouter})
+
+	events, err := client.Interpret(context.Background(), contracts.ImageInput{
+		Source: "drone",
+		Data:   []byte("drone_vora_bridge_collapsed.png"),
+	})
+	if err != nil {
+		t.Fatalf("Interpret failed: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+	if events[0].Type != contracts.EventBridgeCollapsed {
+		t.Errorf("expected BridgeCollapsed, got %s", events[0].Type)
+	}
+}
