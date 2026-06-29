@@ -797,3 +797,150 @@ func TestMockModeIndependentOfProvider(t *testing.T) {
 		t.Errorf("mock response should contain Infrastructure agent marker, got: %s", resp.Content)
 	}
 }
+
+// --- P21: LLM token stats ---
+
+func TestTokenStatsFromCompleteMock(t *testing.T) {
+	t.Setenv("LLM_MOCK", "true")
+	c := NewClient(Config{})
+
+	// Initial stats should be zero.
+	tin, tout := c.TotalTokens()
+	if tin != 0 || tout != 0 {
+		t.Fatalf("initial stats: in=%d out=%d, want 0/0", tin, tout)
+	}
+	if c.TotalRequests() != 0 {
+		t.Fatalf("initial requests: %d, want 0", c.TotalRequests())
+	}
+
+	// One mock completion should increment counters.
+	_, err := c.Complete(context.Background(), contracts.LLMRequest{
+		System: "commander",
+		User:   "synthesize version 1",
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	tin, tout = c.TotalTokens()
+	if tin == 0 {
+		t.Error("expected tokensIn > 0 after mock call")
+	}
+	if tout == 0 {
+		t.Error("expected tokensOut > 0 after mock call")
+	}
+	if c.TotalRequests() != 1 {
+		t.Errorf("expected 1 request, got %d", c.TotalRequests())
+	}
+}
+
+func TestTokenStatsFromCompleteReal(t *testing.T) {
+	os.Unsetenv("LLM_MOCK")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := chatCompletionResponse{
+			Choices: []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}{{Message: struct {
+				Content string `json:"content"`
+			}{Content: `{"status":"ok"}`}}},
+		}
+		resp.Usage.PromptTokens = 100
+		resp.Usage.CompletionTokens = 50
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	c := NewClient(Config{APIKey: "k", BaseURL: server.URL, MaxRetries: 1})
+
+	in1, out1 := c.TotalTokens()
+
+	_, err := c.Complete(context.Background(), contracts.LLMRequest{User: "hi"})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	in2, out2 := c.TotalTokens()
+	if in2 != in1+100 {
+		t.Errorf("tokensIn: %d, want %d", in2, in1+100)
+	}
+	if out2 != out1+50 {
+		t.Errorf("tokensOut: %d, want %d", out2, out1+50)
+	}
+	if c.TotalRequests() != 1 {
+		t.Errorf("requests: %d, want 1", c.TotalRequests())
+	}
+}
+
+func TestResetStats(t *testing.T) {
+	t.Setenv("LLM_MOCK", "true")
+	c := NewClient(Config{})
+
+	// Run two completions.
+	c.Complete(context.Background(), contracts.LLMRequest{System: "commander", User: "v1"})
+	c.Complete(context.Background(), contracts.LLMRequest{System: "infra", User: "v2"})
+
+	if c.TotalRequests() != 2 {
+		t.Fatalf("expected 2 requests, got %d", c.TotalRequests())
+	}
+
+	c.ResetStats()
+
+	tin, tout := c.TotalTokens()
+	if tin != 0 || tout != 0 {
+		t.Errorf("stats after reset: in=%d out=%d, want 0/0", tin, tout)
+	}
+	if c.TotalRequests() != 0 {
+		t.Errorf("requests after reset: %d, want 0", c.TotalRequests())
+	}
+}
+
+func TestTokenStatsAccumulate(t *testing.T) {
+	t.Setenv("LLM_MOCK", "true")
+	c := NewClient(Config{})
+
+	// Two calls should accumulate.
+	c.Complete(context.Background(), contracts.LLMRequest{System: "commander", User: "v1"})
+	req1 := c.TotalRequests()
+	in1, out1 := c.TotalTokens()
+
+	c.Complete(context.Background(), contracts.LLMRequest{System: "medical", User: "v2"})
+	req2 := c.TotalRequests()
+	in2, out2 := c.TotalTokens()
+
+	if req2 != req1+1 {
+		t.Errorf("requests did not accumulate: %d -> %d", req1, req2)
+	}
+	if in2 <= in1 {
+		t.Errorf("tokensIn did not accumulate: %d -> %d", in1, in2)
+	}
+	if out2 <= out1 {
+		t.Errorf("tokensOut did not accumulate: %d -> %d", out1, out2)
+	}
+}
+
+func TestPerceptionIncrementsStats(t *testing.T) {
+	t.Setenv("LLM_MOCK", "true")
+	c := NewClient(Config{})
+
+	preq := c.TotalRequests()
+
+	_, err := c.Interpret(context.Background(), contracts.ImageInput{
+		Source: "drone",
+		Data:   []byte("drone_vora_bridge_collapsed.png"),
+	})
+	if err != nil {
+		t.Fatalf("Interpret: %v", err)
+	}
+
+	if c.TotalRequests() <= preq {
+		t.Error("Interpret should increment request count")
+	}
+	tin, tout := c.TotalTokens()
+	if tin == 0 || tout == 0 {
+		t.Errorf("Interpret should increment tokens: in=%d out=%d", tin, tout)
+	}
+}
