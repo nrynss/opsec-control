@@ -405,6 +405,7 @@ func (c *Client) completeReal(ctx context.Context, req contracts.LLMRequest) (co
 		TokensIn:     tokensIn,
 		TokensOut:    tokensOut,
 		TokensPerSec: tokensPerSec,
+		LatencyMS:    duration.Milliseconds(),
 	}, nil
 }
 
@@ -566,5 +567,6 @@ func (c *Client) completeMock(ctx context.Context, req contracts.LLMRequest) (co
 		TokensIn:     tokensIn,
 		TokensOut:    tokensOut,
 		TokensPerSec: tokensPerSec,
+		LatencyMS:    simulatedDuration.Milliseconds(),
 	}, nil
 }
