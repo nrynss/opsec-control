@@ -85,8 +85,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: fly deploy (no HA second machine — single-instance rule)
-        run: flyctl deploy --remote-only --ha=false
+      # Build the image on the runner (which already builds it in the `docker`
+      # job) and push to registry.fly.io, instead of Fly's remote builder.
+      # Avoids the Depot builder provisioning timeouts ("context deadline
+      # exceeded" while "Waiting for depot builder...") that blocked deploys.
+      - name: fly deploy (local build; no HA second machine — single-instance rule)
+        run: flyctl deploy --local-only --ha=false
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       - name: enforce single instance (belt-and-suspenders)
