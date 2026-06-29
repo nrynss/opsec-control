@@ -38,7 +38,7 @@ func TestRegisterAndState(t *testing.T) {
 	bus := &mockBus{}
 	log := &mockLog{}
 
-	srv := New(store, bus, log, nil, nil)
+	srv := New(store, bus, log, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -72,7 +72,7 @@ func TestPerceptionNil(t *testing.T) {
 	bus := &mockBus{}
 	log := &mockLog{}
 
-	srv := New(store, bus, log, nil, nil)
+	srv := New(store, bus, log, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -96,7 +96,7 @@ func TestPerceptionRawAndPublish(t *testing.T) {
 		},
 	}
 
-	srv := New(store, bus, log, nil, mp)
+	srv := New(store, bus, log, nil, mp, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -124,7 +124,7 @@ func TestPerceptionMultipart(t *testing.T) {
 	log := &mockLog{}
 	mp := &mockPerception{events: []contracts.Event{{ID: "mp1", Type: contracts.EventBuildingCollapsed, Confidence: 0.88}}}
 
-	srv := New(store, bus, log, nil, mp)
+	srv := New(store, bus, log, nil, mp, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -155,7 +155,7 @@ func TestPerceptionBadSourceAndError(t *testing.T) {
 	log := &mockLog{}
 	mp := &mockPerception{err: context.DeadlineExceeded} // simulate failure
 
-	srv := New(store, bus, log, nil, mp)
+	srv := New(store, bus, log, nil, mp, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -190,7 +190,7 @@ func TestPerceptionPayloadTooLarge(t *testing.T) {
 	log := &mockLog{}
 	mp := &mockPerception{events: []contracts.Event{{ID: "big", Type: contracts.EventRoadBlocked, Confidence: 0.5}}}
 
-	srv := New(store, bus, log, nil, mp)
+	srv := New(store, bus, log, nil, mp, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -214,7 +214,7 @@ func TestScenarioControlStubs(t *testing.T) {
 	bus := &mockBus{}
 	log := &mockLog{}
 
-	srv := New(store, bus, log, nil, nil)
+	srv := New(store, bus, log, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -260,5 +260,134 @@ func TestScenarioControlStubs(t *testing.T) {
 	var speedResp map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&speedResp); err != nil || speedResp["speed"] != 4.5 {
 		t.Errorf("speed response should echo speed, got %+v err=%v", speedResp, err)
+	}
+}
+
+// --- P10 provider switch tests ---
+
+type mockProviderSwitcher struct {
+	p string
+}
+
+func (m *mockProviderSwitcher) Provider() string { return m.p }
+func (m *mockProviderSwitcher) SetProvider(p string) {
+	m.p = p
+}
+
+type mockBcast struct {
+	msgs []any
+}
+
+func (m *mockBcast) Broadcast(msg any) { m.msgs = append(m.msgs, msg) }
+
+func TestProviderNil(t *testing.T) {
+	store := &mockStore{}
+	bus := &mockBus{}
+	log := &mockLog{}
+
+	srv := New(store, bus, log, nil, nil, nil, nil)
+	mux := http.NewServeMux()
+	srv.Register(mux)
+
+	// GET without wiring
+	req := httptest.NewRequest("GET", "/provider", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET nil: expected 503, got %d", w.Code)
+	}
+
+	// POST without wiring
+	req = httptest.NewRequest("POST", "/provider", bytes.NewReader([]byte(`{"provider":"openrouter"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST nil: expected 503, got %d", w.Code)
+	}
+}
+
+func TestProviderGetSetBroadcast(t *testing.T) {
+	store := &mockStore{}
+	bus := &mockBus{}
+	log := &mockLog{}
+	ps := &mockProviderSwitcher{p: "cerebras"}
+	bc := &mockBcast{}
+
+	srv := New(store, bus, log, nil, nil, ps, bc)
+	mux := http.NewServeMux()
+	srv.Register(mux)
+
+	// GET initial
+	req := httptest.NewRequest("GET", "/provider", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET: expected 200, got %d", w.Code)
+	}
+	var getResp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&getResp); err != nil || getResp["provider"] != "cerebras" {
+		t.Fatalf("GET resp: %+v err=%v", getResp, err)
+	}
+
+	// POST switch
+	body := bytes.NewReader([]byte(`{"provider":"openrouter"}`))
+	req = httptest.NewRequest("POST", "/provider", body)
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("POST: expected 202, got %d body=%s", w.Code, w.Body.String())
+	}
+	if ps.Provider() != "openrouter" {
+		t.Fatalf("switch did not take effect, got %q", ps.Provider())
+	}
+	if len(bc.msgs) != 1 {
+		t.Fatalf("expected 1 broadcast, got %d", len(bc.msgs))
+	}
+	// check broadcast shape
+	if m, ok := bc.msgs[0].(map[string]any); !ok || m["kind"] != "provider" {
+		t.Fatalf("broadcast wrong shape: %+v", bc.msgs[0])
+	}
+
+	// GET after
+	req = httptest.NewRequest("GET", "/provider", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET after: expected 200, got %d", w.Code)
+	}
+	if err := json.NewDecoder(w.Body).Decode(&getResp); err != nil || getResp["provider"] != "openrouter" {
+		t.Fatalf("GET after resp: %+v err=%v", getResp, err)
+	}
+}
+
+func TestProviderBadInput(t *testing.T) {
+	store := &mockStore{}
+	bus := &mockBus{}
+	log := &mockLog{}
+	ps := &mockProviderSwitcher{p: "cerebras"}
+
+	srv := New(store, bus, log, nil, nil, ps, nil)
+	mux := http.NewServeMux()
+	srv.Register(mux)
+
+	cases := []struct {
+		body string
+		code int
+	}{
+		{`{}`, http.StatusBadRequest},
+		{`{"provider":""}`, http.StatusBadRequest},
+		{`{"provider":"foo"}`, http.StatusBadRequest},
+		{`not json`, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("POST", "/provider", bytes.NewReader([]byte(c.body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != c.code {
+			t.Errorf("bad input %q: expected %d, got %d", c.body, c.code, w.Code)
+		}
 	}
 }

@@ -28,6 +28,20 @@ type EventLog interface {
 	Since(ts contracts.SimTime) []timeline.Entry
 }
 
+// ProviderSwitcher exposes read/set for the active LLM backend (P10).
+// Uses string values "cerebras" | "openrouter". cmd/eoc adapts *llm.Client
+// so that api does not import llm or leak provider types.
+type ProviderSwitcher interface {
+	Provider() string
+	SetProvider(p string)
+}
+
+// Broadcaster is satisfied by *websocket.Server. Used to notify connected
+// clients of provider switches over WS (P10).
+type Broadcaster interface {
+	Broadcast(msg any)
+}
+
 // toFlatEvents converts timeline entries to flat contract.Events for the wire
 // (avoids nested {"Event": {...}} shape).
 func toFlatEvents(entries []timeline.Entry) []contracts.Event {
@@ -53,16 +67,20 @@ type Server struct {
 	log        EventLog
 	cop        COPProvider
 	perception contracts.Perception
+	provider   ProviderSwitcher
+	bcast      Broadcaster
 }
 
 // New creates the API server.
-func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop COPProvider, perception contracts.Perception) *Server {
+func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop COPProvider, perception contracts.Perception, provider ProviderSwitcher, bcast Broadcaster) *Server {
 	return &Server{
 		store:      store,
 		bus:        bus,
 		log:        log,
 		cop:        cop,
 		perception: perception,
+		provider:   provider,
+		bcast:      bcast,
 	}
 }
 
@@ -74,6 +92,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /events", s.handleGetEvents)
 	mux.HandleFunc("POST /events", s.handlePostEvent)
 	mux.HandleFunc("POST /perception", s.handlePostPerception)
+	mux.HandleFunc("GET /provider", s.handleGetProvider)
+	mux.HandleFunc("POST /provider", s.handlePostProvider)
 	mux.HandleFunc("POST /scenario/load", s.handleScenarioLoad)
 	mux.HandleFunc("POST /scenario/reset", s.handleScenarioReset)
 	mux.HandleFunc("POST /scenario/pause", s.handleScenarioPause)
@@ -290,5 +310,54 @@ func (s *Server) handlePostPerception(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"accepted": len(events),
 		"events":   events,
+	})
+}
+
+// handleGetProvider reports the current LLM provider (P10).
+// Returns 503 if no ProviderSwitcher wired.
+func (s *Server) handleGetProvider(w http.ResponseWriter, r *http.Request) {
+	if s.provider == nil {
+		http.Error(w, "provider switch not wired", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"provider": s.provider.Provider(),
+	})
+}
+
+// handlePostProvider switches the active LLM provider (P10).
+// Accepts {"provider": "cerebras" | "openrouter"}.
+// Broadcasts {"kind":"provider","payload":{"provider":"..."}} when bcast wired.
+// Returns 503/400/202 as appropriate.
+func (s *Server) handlePostProvider(w http.ResponseWriter, r *http.Request) {
+	if s.provider == nil {
+		http.Error(w, "provider switch not wired", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Provider == "" {
+		http.Error(w, `bad request: expected {"provider":"cerebras"|"openrouter"}`, http.StatusBadRequest)
+		return
+	}
+	p := body.Provider
+	if p != "cerebras" && p != "openrouter" {
+		http.Error(w, `provider must be "cerebras" or "openrouter"`, http.StatusBadRequest)
+		return
+	}
+	s.provider.SetProvider(p)
+	if s.bcast != nil {
+		s.bcast.Broadcast(map[string]any{
+			"kind":    "provider",
+			"payload": map[string]any{"provider": p},
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":   "accepted",
+		"provider": p,
 	})
 }
