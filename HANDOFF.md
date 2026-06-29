@@ -295,9 +295,14 @@ serves the dashboard **live** (real metrics, scenario replay, COPs) and the
 `/provider` switch works in-container. This is the same image Fly will build — the
 remaining deploy steps are mechanical (see [`hosting.md`](hosting.md) §4).
 
-### Live on Fly.io (2026-06-29) — IN PROGRESS
-App **`cerebro-eoc`** created and deployed from [`fly.toml`](fly.toml) (region
-`iad`, single-origin image). URL: **https://cerebro-eoc.fly.dev/**.
+### Live on Fly.io (2026-06-29) — ✅ DEPLOYED & VERIFIED LIVE
+App **`cerebro-eoc`** deployed from [`fly.toml`](fly.toml) (region `iad`,
+single-origin image). URL: **https://cerebro-eoc.fly.dev/**.
+
+**Verified live** (external curl, no Fly auth): `fly status` = 1 machine, health
+check passing; `/state` version 17 / time 170 (full scenario replay); `/agents`
+returns real entity-grounded COPs (not the canned mock strings) → Cerebras secrets
+set and doing real inference; `/provider` = cerebras. Single-instance rule honored.
 
 Gotchas hit + fixes (record for the Cloud Run migration / re-deploys):
 - **Fly creates 2 machines by default** (HA, zero-downtime) — this **violates the
@@ -308,10 +313,10 @@ Gotchas hit + fixes (record for the Cloud Run migration / re-deploys):
   `fly secrets set CEREBRAS_API_KEY=… OPENROUTER_API_KEY=…` (a placeholder typo
   leaves the app in **mock mode** — no real LLM). Setting secrets rolls the machine.
 
-Post-deploy verification (the demo bar): `fly status` shows 1 machine; the page
-loads **Live / Connected** (not Offline/Demo); provider dropdown flips; a preset
-button fires a real fan-out. **A follow-up commit will mark this Done once verified
-live with secrets set.**
+Post-deploy verification (the demo bar): `fly status` shows 1 machine ✅; `/state`
+serves a fully-replayed snapshot ✅; `/agents` shows real (non-mock) COPs ✅.
+Confirm in a browser too: page loads **Live / Connected**, provider dropdown flips,
+a preset button fires a real fan-out.
 
 **Still pending:** Cloudflare custom domain (CNAME → `cerebro-eoc.fly.dev`,
 proxied, Full(strict)) — see [`hosting.md`](hosting.md) §5.
