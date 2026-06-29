@@ -45,7 +45,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 		events = append(events, contracts.Event{
 			ID:         contracts.EventID("evt-perc-vora"),
 			Timestamp:  0, // Will be set by EOC runner
-			Source:     fmt.Sprintf("Gemma4-Perception-%s", input.Source),
+			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
 			Type:       contracts.EventBridgeCollapsed,
 			Confidence: 0.98,
 			Payload:    json.RawMessage(`{"bridgeId": "vora"}`),
@@ -54,7 +54,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 		events = append(events, contracts.Event{
 			ID:         contracts.EventID("evt-perc-highgate"),
 			Timestamp:  0,
-			Source:     fmt.Sprintf("Gemma4-Perception-%s", input.Source),
+			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
 			Type:       contracts.EventBuildingCollapsed,
 			Confidence: 0.92,
 			Payload:    json.RawMessage(`{"sector": "highgate"}`),
@@ -63,7 +63,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 		events = append(events, contracts.Event{
 			ID:         contracts.EventID("evt-perc-levee"),
 			Timestamp:  0,
-			Source:     fmt.Sprintf("Gemma4-Perception-%s", input.Source),
+			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
 			Type:       contracts.EventLeveeBreached,
 			Confidence: 0.95,
 			Payload:    json.RawMessage(`{"sector": "southport"}`),
@@ -74,7 +74,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 			events = append(events, contracts.Event{
 				ID:         contracts.EventID("evt-perc-gen-sat"),
 				Timestamp:  0,
-				Source:     "Gemma4-Perception-satellite",
+				Source:     "Cerebras-Perception-satellite",
 				Type:       contracts.EventBuildingCollapsed,
 				Confidence: 0.88,
 				Payload:    json.RawMessage(`{"sector": "central"}`),
@@ -83,7 +83,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 			events = append(events, contracts.Event{
 				ID:         contracts.EventID("evt-perc-gen-drone"),
 				Timestamp:  0,
-				Source:     "Gemma4-Perception-drone",
+				Source:     "Cerebras-Perception-drone",
 				Type:       contracts.EventRoadBlocked,
 				Confidence: 0.91,
 				Payload:    json.RawMessage(`{"roadId": "R-WEST-1"}`),
