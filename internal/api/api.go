@@ -69,10 +69,12 @@ type Server struct {
 	perception contracts.Perception
 	provider   ProviderSwitcher
 	bcast      Broadcaster
+	simCtrl    contracts.SimulationController
+	tokenStats contracts.TokenStatsProvider
 }
 
 // New creates the API server.
-func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop COPProvider, perception contracts.Perception, provider ProviderSwitcher, bcast Broadcaster) *Server {
+func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop COPProvider, perception contracts.Perception, provider ProviderSwitcher, bcast Broadcaster, simCtrl contracts.SimulationController, tokenStats contracts.TokenStatsProvider) *Server {
 	return &Server{
 		store:      store,
 		bus:        bus,
@@ -81,6 +83,8 @@ func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop C
 		perception: perception,
 		provider:   provider,
 		bcast:      bcast,
+		simCtrl:    simCtrl,
+		tokenStats: tokenStats,
 	}
 }
 
@@ -94,6 +98,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /perception", s.handlePostPerception)
 	mux.HandleFunc("GET /provider", s.handleGetProvider)
 	mux.HandleFunc("POST /provider", s.handlePostProvider)
+	mux.HandleFunc("GET /scenario/stats", s.handleScenarioStats)
 	mux.HandleFunc("POST /scenario/load", s.handleScenarioLoad)
 	mux.HandleFunc("POST /scenario/reset", s.handleScenarioReset)
 	mux.HandleFunc("POST /scenario/pause", s.handleScenarioPause)
@@ -190,18 +195,30 @@ func (s *Server) handleScenarioLoad(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleScenarioReset(w http.ResponseWriter, r *http.Request) {
+	if s.simCtrl != nil {
+		s.simCtrl.Reset()
+	}
 	s.respondWithScenarioStub(w, "reset")
 }
 
 func (s *Server) handleScenarioPause(w http.ResponseWriter, r *http.Request) {
+	if s.simCtrl != nil {
+		s.simCtrl.Pause()
+	}
 	s.respondWithScenarioStub(w, "pause")
 }
 
 func (s *Server) handleScenarioResume(w http.ResponseWriter, r *http.Request) {
+	if s.simCtrl != nil {
+		s.simCtrl.Resume()
+	}
 	s.respondWithScenarioStub(w, "resume")
 }
 
 func (s *Server) handleScenarioStep(w http.ResponseWriter, r *http.Request) {
+	if s.simCtrl != nil {
+		s.simCtrl.Step()
+	}
 	s.respondWithScenarioStub(w, "step")
 }
 
@@ -211,11 +228,41 @@ func (s *Server) handleScenarioSpeed(w http.ResponseWriter, r *http.Request) {
 		Speed float64 `json:"speed"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	if s.simCtrl != nil && body.Speed != 0 {
+		s.simCtrl.SetSpeed(body.Speed)
+	}
 	extra := map[string]any{}
 	if body.Speed != 0 {
 		extra["speed"] = body.Speed
 	}
 	s.respondWithScenarioStub(w, "speed", extra)
+}
+
+// handleScenarioStats returns simulation progress, wall time, event count,
+// and LLM token/inference stats (P19/P21).
+func (s *Server) handleScenarioStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.simCtrl == nil || s.tokenStats == nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "not_wired",
+		})
+		return
+	}
+	info := s.simCtrl.Info()
+	in, out := s.tokenStats.TotalTokens()
+	reqs := s.tokenStats.TotalRequests()
+	stats := contracts.SimulationStats{
+		Status:         contracts.SimulationStatus(s.simCtrl.Status()),
+		CurrentTime:    s.simCtrl.CurrentTime(),
+		ElapsedTime:    s.simCtrl.CurrentTime() - info.StartTime,
+		WallElapsed:    s.simCtrl.WallElapsedMS(),
+		EventsReplayed: 0, // TODO from timeline or sim in P21
+		TokensIn:       in,
+		TokensOut:      out,
+		Inferences:     reqs,
+		Speed:          1.0, // TODO
+	}
+	json.NewEncoder(w).Encode(stats)
 }
 
 // handlePostPerception accepts a satellite/drone image via raw request body

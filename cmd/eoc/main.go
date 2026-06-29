@@ -203,6 +203,9 @@ func main() {
 	cop := &copStore{}
 	wsSrv := websocket.New(bus)
 
+	// Simulation engine (for stats/clock in P19+)
+	sim := simulation.New(bus)
+
 	a := &app{store: store, classifier: anomaly.New(), orch: orch, cop: cop, ws: wsSrv}
 
 	// --- HTTP/WS edge ---
@@ -210,7 +213,7 @@ func main() {
 	// Wire perception + provider switch: llmClient implements contracts.Perception;
 	// providerAdapter bridges llm.Provider ↔ string for the api layer (P11).
 	// wsSrv satisfies api.Broadcaster — provider switches are broadcast to clients.
-	api.New(store, bus, tl, cop, llmClient, &providerAdapter{client: llmClient}, wsSrv).Register(mux)
+	api.New(store, bus, tl, cop, llmClient, &providerAdapter{client: llmClient}, wsSrv, sim, nil).Register(mux)
 	mux.Handle("GET /stream", wsSrv.Handler())
 
 	// Serve the static web dashboard at / (single-origin — HANDOFF §8 deploy decision).
@@ -239,7 +242,6 @@ func main() {
 	go a.runLoop(ctx, eventCh)
 
 	// Replay the scenario onto the bus.
-	sim := simulation.New(bus)
 	if err := sim.Load(scn); err != nil {
 		log.Fatalf("[eoc] sim load: %v", err)
 	}

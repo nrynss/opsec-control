@@ -156,3 +156,31 @@ func TestEventTypeUniqueness(t *testing.T) {
 		seen[e] = true
 	}
 }
+
+func TestSimulationInfoRoundTrip(t *testing.T) {
+	in := contracts.SimulationInfo{
+		Name:      "cerebro-cascade",
+		StartTime: 0,
+		EndTime:   300,
+	}
+	if got := roundJSON(t, in); !reflect.DeepEqual(got, in) {
+		t.Fatalf("SimulationInfo did not round-trip")
+	}
+}
+
+func TestSimulationStatsRoundTrip(t *testing.T) {
+	in := contracts.SimulationStats{
+		Status:         contracts.SimStatusRunning,
+		CurrentTime:    120,
+		ElapsedTime:    120,
+		WallElapsed:    125000,
+		EventsReplayed: 5,
+		TokensIn:       1500,
+		TokensOut:      800,
+		Inferences:     6,
+		Speed:          4.0,
+	}
+	if got := roundJSON(t, in); !reflect.DeepEqual(got, in) {
+		t.Fatalf("SimulationStats did not round-trip")
+	}
+}
