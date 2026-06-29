@@ -12,8 +12,8 @@ import (
 	"github.com/nrynss/opsec-control/internal/events"
 	"github.com/nrynss/opsec-control/internal/orchestrator"
 	"github.com/nrynss/opsec-control/internal/scenario"
-	"github.com/nrynss/opsec-control/internal/state"
 	"github.com/nrynss/opsec-control/internal/simulation"
+	"github.com/nrynss/opsec-control/internal/state"
 	"github.com/nrynss/opsec-control/internal/timeline"
 )
 
@@ -126,7 +126,7 @@ func TestFullSimulationControlLifecycle(t *testing.T) {
 	defer stopTL()
 
 	sim := simulation.New(bus)
-	
+
 	ctrl := &eocSimController{
 		sim:       sim,
 		store:     a.store.(*state.Store),
