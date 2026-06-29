@@ -31,6 +31,16 @@
     tickTokens: 0
   };
 
+  // Last decision (fan-out) latency remembered per provider, so the telemetry
+  // card can show a Cerebras-vs-OpenRouter comparison that survives the toggle.
+  // Persisted across resets on purpose — it's a benchmark receipt, not live state.
+  var lastLatencyByProvider = { cerebras: 0, openrouter: 0 };
+
+  // Cumulative AI reasoning time for the CURRENT run (sum of every fan-out's
+  // latency). Reset on All Clear. Mirrored per provider for the comparison tooltip.
+  var totalDecisionMs = 0;
+  var totalDecisionByProvider = { cerebras: 0, openrouter: 0 };
+
   // Commander COP
   var cop = {
     summary: "EOC system nominal. Standing by for telemetry.",
@@ -63,16 +73,16 @@
 
   var currentProvider = "cerebras";
   var switchingProvider = false;
-  var demoMode = true; // Default to demo mode if WS fails or offline
+  var isDisconnected = true;
+  var isInitialized = false;
+  var overlayFading = false;
   var ws = null;
-  var demoTimer = null;
-  var demoStep = 0;
 
   // P25 Playback and Telemetry State
   var isPlaying = false;
   var speed = 1.0;
   var stats = {
-    status: "running",
+    status: "paused",
     currentTime: 0,
     elapsedTime: 0,
     wallElapsed: 0,
@@ -82,8 +92,6 @@
     inferences: 0,
     speed: 1.0
   };
-  var demoWallStart = null;
-  var demoAccumulatedWallTime = 0;
   var lastResetTime = 0;
   var pendingReset = false;
 
@@ -134,12 +142,13 @@
       cellHistory[k] = [];
     }
     metrics = { activeCells: 0, tokensPerSec: 0, latencyMs: 0, tickTokens: 0 };
+    totalDecisionMs = 0; // new run — clear the cumulative reasoning total
     timelineEvents = [];
     matrixLogs = [{ prefix: "SYSTEM", content: "Cerebro command center ready. Listening on /stream." }];
 
     // P25: Reset stats to nominal faked or zero
     stats = {
-      status: isPlaying ? "running" : "paused",
+      status: "paused",
       currentTime: 0,
       elapsedTime: 0,
       wallElapsed: 0,
@@ -149,12 +158,6 @@
       inferences: 0,
       speed: speed
     };
-    demoAccumulatedWallTime = 0;
-    if (isPlaying && demoMode) {
-      demoWallStart = Date.now();
-    } else {
-      demoWallStart = null;
-    }
   }
 
   afterUpdate(() => {
@@ -177,7 +180,6 @@
 
     return () => {
       if (ws) ws.close();
-      if (demoTimer) clearInterval(demoTimer);
       stopStatsPolling();
     };
   });
@@ -187,7 +189,7 @@
   function startStatsPolling() {
     if (statsInterval) return;
     statsInterval = setInterval(async () => {
-      if (demoMode || !ws || ws.readyState !== WebSocket.OPEN) {
+      if (isDisconnected) {
         return;
       }
       try {
@@ -230,12 +232,15 @@
       var res = await fetch("/state");
       if (res.ok) {
         state = await res.json();
-        demoMode = false; // Real server is available
+        isDisconnected = false; // Real server is available
         addLog("SYSTEM", "Loaded snapshot from /state backend.");
+        if (state.version > 0 || state.time > 0) {
+          isInitialized = true;
+        }
         startStatsPolling();
       }
     } catch (e) {
-      // Keep demo mode active
+      // Keep disconnected
     }
   }
 
@@ -280,22 +285,13 @@
   function connectWebSocket() {
     var loc = window.location;
     var wsUrl = (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/stream";
-    
-    // In dev mode pointing to localhost:8080
-    if (loc.port === "5173" || loc.port === "4321") {
-      wsUrl = "ws://localhost:8080/stream";
-    }
 
     try {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
-        demoMode = false;
+        isDisconnected = false;
         pendingReset = false;
         lastResetTime = 0;
-        if (demoTimer) {
-          clearInterval(demoTimer);
-          demoTimer = null;
-        }
         addLog("WS", "Connected to live EventBus stream.");
         startStatsPolling();
       };
@@ -305,18 +301,18 @@
       };
 
       ws.onerror = () => {
-        // Silent fail, falls back to demo mode
+        isDisconnected = true;
       };
 
       ws.onclose = () => {
+        isDisconnected = true;
         stopStatsPolling();
-        if (!demoMode) {
-          addLog("SYSTEM", "WebSocket disconnected. Starting local simulation.");
-          startDemoMode();
-        }
+        addLog("SYSTEM", "WebSocket disconnected. Reconnecting in 3s...");
+        setTimeout(connectWebSocket, 3000);
       };
     } catch (e) {
-      startDemoMode();
+      isDisconnected = true;
+      setTimeout(connectWebSocket, 3000);
     }
   }
 
@@ -371,6 +367,13 @@
         metrics.tokensPerSec = payload.metrics.aggregateTokensPerSec || 0;
         metrics.latencyMs = payload.metrics.fanOutLatencyMs || 0;
         metrics.tickTokens = payload.metrics.totalTokensOut || 0;
+        // Remember this provider's latest decision latency for the comparison card.
+        if (payload.metrics.fanOutLatencyMs > 0) {
+          lastLatencyByProvider = { ...lastLatencyByProvider, [currentProvider]: payload.metrics.fanOutLatencyMs };
+          // Accumulate total reasoning time for this run + snapshot it per provider.
+          totalDecisionMs += payload.metrics.fanOutLatencyMs;
+          totalDecisionByProvider = { ...totalDecisionByProvider, [currentProvider]: totalDecisionMs };
+        }
       } else {
         metrics.activeCells = 0;
       }
@@ -433,378 +436,56 @@
     }
   }
 
-  const DEMO_MAX_TIME = 60;
+  var selectedScenario = "cerebro-cascade";
 
-  function updateDemoStats(updates) {
-    for (var k in updates) {
-      stats[k] = updates[k];
+  async function initializeEOC() {
+    try {
+      var res = await fetch("/scenario/reset", { method: "POST" });
+      if (res.ok) {
+        overlayFading = true;
+        addLog("SYSTEM", "Initializing Emergency Operation Center for Cerebro Earthquake Cascade...");
+        setTimeout(() => {
+          isInitialized = true;
+          overlayFading = false;
+          loadNominalState();
+          addLog("SYSTEM", "Emergency Operation Center initialized.");
+        }, 300);
+      } else {
+        addLog("SYSTEM_ERR", "Failed to initialize EOC simulation.");
+      }
+    } catch (e) {
+      addLog("SYSTEM_ERR", "Network error during EOC initialization.");
     }
-    stats = stats;
-  }
-
-  function startDemoMode() {
-    demoMode = true;
-    pendingReset = false;
-    lastResetTime = 0;
-    isPlaying = true;
-    speed = 1.0;
-    loadNominalState();
-    resumeDemoMode();
   }
 
   function handlePlay(event) {
     var play = event.detail;
     isPlaying = play;
-    if (demoMode) {
-      updateDemoStats({ status: play ? "running" : "paused" });
-      if (play) {
-        demoWallStart = Date.now();
-        resumeDemoMode();
-      } else {
-        if (demoWallStart) {
-          demoAccumulatedWallTime += Date.now() - demoWallStart;
-        }
-        demoWallStart = null;
-        pauseDemoMode();
-      }
-    }
   }
 
   function handleStep() {
     isPlaying = false;
-    if (demoMode) {
-      updateDemoStats({ status: "paused" });
-      if (demoWallStart) {
-        demoAccumulatedWallTime += Date.now() - demoWallStart;
-      }
-      demoWallStart = null;
-      pauseDemoMode();
-      tickDemo();
-    }
   }
 
   function handleReset() {
-    if (demoMode) {
-      isPlaying = true;
-      speed = 1.0;
-      loadNominalState();
-      resumeDemoMode();
-    } else {
-      // Optimistic immediate clear for live reset (snappy All Clear UX);
-      // backend reset + WS broadcast will confirm/sync
-      isPlaying = false;
-      speed = 1.0;
-      lastResetTime = Date.now();
-      pendingReset = true;
-      loadNominalState();
-    }
+    isPlaying = false;
+    speed = 1.0;
+    lastResetTime = Date.now();
+    pendingReset = true;
+    loadNominalState();
   }
 
   function handleLoad(event) {
     var name = event.detail;
     isPlaying = false;
     speed = 1.0;
-    if (demoMode) {
-      loadNominalState();
-      pauseDemoMode();
-      addLog("SYSTEM", `Loaded mock scenario: ${name}`);
-    } else {
-      // Optimistic clear for live scenario load
-      loadNominalState();
-      addLog("SYSTEM", `Loading scenario: ${name}`);
-    }
+    loadNominalState();
+    addLog("SYSTEM", `Loading scenario: ${name}`);
   }
 
   function handleSpeed(event) {
     var s = event.detail;
     speed = s;
-    if (demoMode) {
-      updateDemoStats({ speed: s });
-      if (isPlaying) {
-        resumeDemoMode();
-      }
-    }
-  }
-
-  function pauseDemoMode() {
-    if (demoTimer) {
-      clearInterval(demoTimer);
-      demoTimer = null;
-    }
-  }
-
-  function resumeDemoMode() {
-    if (demoTimer) clearInterval(demoTimer);
-    demoTimer = setInterval(() => {
-      tickDemo();
-    }, 1000 / speed);
-  }
-
-  function tickDemo() {
-    state.time += 1;
-    state = state;
-    
-    var wall = demoAccumulatedWallTime;
-    if (demoWallStart) {
-      wall += (Date.now() - demoWallStart);
-    }
-
-    updateDemoStats({
-      currentTime: state.time,
-      elapsedTime: state.time,
-      wallElapsed: wall,
-      eventsReplayed: timelineEvents.length
-    });
-
-    // Act 1: shock at t=6
-    if (state.time === 6) {
-      triggerAct1();
-    }
-    // Act 2: aftershock + fire at t=18
-    else if (state.time === 18) {
-      triggerAct2();
-    }
-    // Act 3: flood breach at t=34
-    else if (state.time === 34) {
-      triggerAct3();
-    }
-    // Loop replay at t=DEMO_MAX_TIME
-    else if (state.time >= DEMO_MAX_TIME) {
-      state.time = 0;
-      loadNominalState();
-    }
-  }
-
-  function triggerAct1() {
-    addLog("SENSOR", "SEISMIC SPIKE DETECTED. MAGNITUDE 6.8.");
-    
-    var event = { id: "evt-shock", timestamp: 6, source: "seismograph", type: "MainshockOccurred", confidence: 1.0 };
-    timelineEvents = [...timelineEvents, event];
-
-    // Map shock adjustments
-    state.version += 1;
-    state.sectors.highgate.power = "off";
-    state.sectors.central.power = "off";
-    state.bridges.vora.status = "closed";
-    state.bridges.iron.status = "closed";
-
-    // Simulate parallel cell activation
-    metrics.activeCells = 5;
-    metrics.tokensPerSec = 1500;
-    metrics.latencyMs = 480;
-    metrics.tickTokens = 1200;
-
-    for (var k in cellStatuses) {
-      cellStatuses[k] = "analyzing";
-    }
-
-    addLog("ORCH", "ANOMALY: Seismic alert. Invoking specialists in parallel.");
-
-    // Cells finish simultaneously
-    setTimeout(() => {
-      if (!demoMode || stats.currentTime === 0) return;
-      cellStatuses.Intelligence = "done";
-      var outIntel = { agent: "Intelligence", summary: "Aftershock forecast: 82% within 24 hours. Dam telemetry shows elevated stress.", riskLevel: "Medium", confidence: 0.9, stateVersion: state.version, recommendations: ["Continuous dam telemetry monitoring"], evidence: ["Substation offline indicators"] };
-      cellHistory.Intelligence = [outIntel, ...cellHistory.Intelligence];
-      addLog("CEREBRAS", JSON.stringify(outIntel));
-
-      cellStatuses.Infrastructure = "done";
-      var outInfra = { agent: "Infrastructure", summary: "Vora and Iron bridges closed due to displacement. Highgate grid offline.", riskLevel: "High", confidence: 0.95, stateVersion: state.version, recommendations: ["Initiate structural scans on Vora Bridge", "Establish detours via South Span"], evidence: ["Bridge sensor displacement indicators"] };
-      cellHistory.Infrastructure = [outInfra, ...cellHistory.Infrastructure];
-      addLog("CEREBRAS", JSON.stringify(outInfra));
-
-      cellStatuses.Medical = "done";
-      var outMed = { agent: "Medical", summary: "Central General hospital on backup generators. Bed occupancy 85%.", riskLevel: "Medium", confidence: 0.88, stateVersion: state.version, recommendations: ["Establish ER overflow zone"], evidence: ["Power grid drops"] };
-      cellHistory.Medical = [outMed, ...cellHistory.Medical];
-      addLog("CEREBRAS", JSON.stringify(outMed));
-
-      cellStatuses.Population = "done";
-      var outPop = { agent: "Population", summary: "No casualties reported. Minor evacuation traffic on highway.", riskLevel: "Low", confidence: 0.92, stateVersion: state.version, recommendations: ["Monitor evacuation flows"], evidence: ["Highway traffic cams"] };
-      cellHistory.Population = [outPop, ...cellHistory.Population];
-      addLog("CEREBRAS", JSON.stringify(outPop));
-
-      cellStatuses.Communications = "done";
-      var outComm = { agent: "Communications", summary: "Highgate cell towers disabled. Mesh network mode active.", riskLevel: "Medium", confidence: 0.91, stateVersion: state.version, recommendations: ["Broadcasting localized alerts via backup channel"], evidence: ["Cell tower telemetry dropouts"] };
-      cellHistory.Communications = [outComm, ...cellHistory.Communications];
-      addLog("CEREBRAS", JSON.stringify(outComm));
-
-      // P25: Update mock stats counters for cells reasoning
-      updateDemoStats({
-        inferences: stats.inferences + 5,
-        tokensIn: stats.tokensIn + 1200,
-        tokensOut: stats.tokensOut + 950,
-        eventsReplayed: timelineEvents.length
-      });
-
-      // Commander synthesizes COP
-      setTimeout(() => {
-        if (!demoMode || stats.currentTime === 0) return;
-        var latestOutputs = [outIntel, outInfra, outMed, outPop, outComm];
-        cop = {
-          summary: "Cerebro earthquake cascade. Two bridges closed, Highgate heavily damaged, Central General hospital at critical capacity.",
-          overallRisk: "High",
-          prioritizedActions: [
-            { priority: 1, action: "Inspect Vora and Iron bridges for structural integrity", owner: "Infrastructure" },
-            { priority: 2, action: "Deploy backup generator fuel to Central General", owner: "Medical" },
-            { priority: 3, action: "Enable localized emergency broadcasts in Highgate", owner: "Communications" }
-          ],
-          cellOutputs: latestOutputs
-        };
-        copHistory = [cop, ...copHistory];
-        metrics.activeCells = 0;
-        addLog("CEREBRAS", JSON.stringify(cop));
-        addLog("ORCH", "Commander synthesized COP successfully in 520ms.");
-
-        // P25: Update mock stats counters for Commander reasoning
-        updateDemoStats({
-          inferences: stats.inferences + 1,
-          tokensIn: stats.tokensIn + 2000,
-          tokensOut: stats.tokensOut + 400,
-          eventsReplayed: timelineEvents.length
-        });
-      }, 200);
-
-    }, 450);
-  }
-
-  function triggerAct2() {
-    addLog("SENSOR", "AFTERSHOCK DETECTED. M5.9. Fire reported in Ironworks.");
-
-    var event = { id: "evt-after", timestamp: 18, source: "seismograph", type: "AftershockOccurred", confidence: 1.0 };
-    var eventFire = { id: "evt-fire", timestamp: 18, source: "citizen", type: "FireIgnited", confidence: 0.9 };
-    timelineEvents = [...timelineEvents, event, eventFire];
-
-    state.version += 1;
-    state.bridges["south-span"].status = "closed"; // South Span closed
-    state.fireZones["ironworks-fire"] = { id: "ironworks-fire", sector: "ironworks", status: "spreading" };
-    state.dam.status = "stressed";
-
-    metrics.activeCells = 2; // Infrastructure + Population
-    metrics.tokensPerSec = 1500;
-    metrics.latencyMs = 380;
-    metrics.tickTokens = 600;
-
-    cellStatuses.Infrastructure = "analyzing";
-    cellStatuses.Population = "analyzing";
-
-    addLog("ORCH", "ANOMALY: South Span closed, fire active. Invoking specialists.");
-
-    setTimeout(() => {
-      if (!demoMode || stats.currentTime === 0) return;
-      cellStatuses.Infrastructure = "done";
-      var outInfra = { agent: "Infrastructure", summary: "South Span restricted. Greenfield evacuation lanes compromised.", riskLevel: "Critical", confidence: 0.94, stateVersion: state.version, recommendations: ["Prioritize South Span structural inspection"], evidence: ["Bridge load sensors spike"] };
-      cellHistory.Infrastructure = [outInfra, ...cellHistory.Infrastructure];
-      addLog("CEREBRAS", JSON.stringify(outInfra));
-
-      cellStatuses.Population = "done";
-      var outPop = { agent: "Population", summary: "Evacuation route blocked. Greenfield shelter at 90% capacity.", riskLevel: "High", confidence: 0.96, stateVersion: state.version, recommendations: ["Redirect traffic to Greenfield secondary gymnasium"], evidence: ["Traffic queue at South Span"] };
-      cellHistory.Population = [outPop, ...cellHistory.Population];
-      addLog("CEREBRAS", JSON.stringify(outPop));
-
-      // P25: Update mock stats counters for cells reasoning
-      updateDemoStats({
-        inferences: stats.inferences + 2,
-        tokensIn: stats.tokensIn + 600,
-        tokensOut: stats.tokensOut + 500,
-        eventsReplayed: timelineEvents.length
-      });
-
-      setTimeout(() => {
-        if (!demoMode || stats.currentTime === 0) return;
-        cop = {
-          summary: "Cascading aftershock triggers multiple utility failures. Greenfield evacuation routes severely compromised. Fire active in Ironworks.",
-          overallRisk: "Critical",
-          prioritizedActions: [
-            { priority: 1, action: "Clear alternative evacuation routes via Southport bypass", owner: "Population" },
-            { priority: 2, action: "Deploy firefighting units to Ironworks sector", owner: "Infrastructure" },
-            { priority: 3, action: "Inspect South Span bridge foundation", owner: "Infrastructure" }
-          ],
-          cellOutputs: [outInfra, outPop]
-        };
-        copHistory = [cop, ...copHistory];
-        metrics.activeCells = 0;
-        addLog("CEREBRAS", JSON.stringify(cop));
-        addLog("ORCH", "Commander synthesized COP successfully in 410ms.");
-
-        // P25: Update mock stats counters for Commander reasoning
-        updateDemoStats({
-          inferences: stats.inferences + 1,
-          tokensIn: stats.tokensIn + 1100,
-          tokensOut: stats.tokensOut + 300,
-          eventsReplayed: timelineEvents.length
-        });
-      }, 150);
-    }, 350);
-  }
-
-  function triggerAct3() {
-    addLog("SENSOR", "LEVEE BREACH IN SOUTHPORT. FLOOD VECTOR ACTIVE.");
-
-    var event = { id: "evt-breach", timestamp: 34, source: "drone-feed", type: "LeveeBreached", confidence: 0.98 };
-    timelineEvents = [...timelineEvents, event];
-
-    state.version += 1;
-    state.levee.status = "breached";
-    state.flood.polygons = [
-      { sector: "southport", depthM: 1.5, points: [{ x: 300, y: 350 }, { x: 500, y: 350 }, { x: 500, y: 440 }, { x: 300, y: 440 }] }
-    ];
-
-    metrics.activeCells = 2; // Intelligence + Population
-    metrics.tokensPerSec = 1500;
-    metrics.latencyMs = 410;
-    metrics.tickTokens = 700;
-
-    cellStatuses.Intelligence = "analyzing";
-    cellStatuses.Population = "analyzing";
-
-    addLog("ORCH", "ANOMALY: Levee failure. Invoking specialists.");
-
-    setTimeout(() => {
-      if (!demoMode || stats.currentTime === 0) return;
-      cellStatuses.Intelligence = "done";
-      var outIntel = { agent: "Intelligence", summary: "Flood vector modeling indicates Southport water depth of 1.5m, rising 10cm/hr.", riskLevel: "High", confidence: 0.93, stateVersion: state.version, recommendations: ["Issue flood warning for Southport lowest elevations"], evidence: ["Water depth telemetry"] };
-      cellHistory.Intelligence = [outIntel, ...cellHistory.Intelligence];
-      addLog("CEREBRAS", JSON.stringify(outIntel));
-
-      cellStatuses.Population = "done";
-      var outPop = { agent: "Population", summary: "Evacuation of Southport sector required. 4,500 citizens stranded.", riskLevel: "Critical", confidence: 0.97, stateVersion: state.version, recommendations: ["Deploy rescue boats to Southport sector"], evidence: ["Drone frames showing water levels"] };
-      cellHistory.Population = [outPop, ...cellHistory.Population];
-      addLog("CEREBRAS", JSON.stringify(outPop));
-
-      // P25: Update mock stats counters for cells reasoning
-      updateDemoStats({
-        inferences: stats.inferences + 2,
-        tokensIn: stats.tokensIn + 700,
-        tokensOut: stats.tokensOut + 550,
-        eventsReplayed: timelineEvents.length
-      });
-
-      setTimeout(() => {
-        if (!demoMode || stats.currentTime === 0) return;
-        cop = {
-          summary: "Levee breach in Southport leads to severe flooding. 4,500 citizens stranded. Evacuations in progress.",
-          overallRisk: "Critical",
-          prioritizedActions: [
-            { priority: 1, action: "Deploy rescue craft and high-clearance vehicles to Southport", owner: "Population" },
-            { priority: 2, action: "Construct sandbag barriers along secondary canal", owner: "Infrastructure" },
-            { priority: 3, action: "Set up triage and dry evacuation zone at Greenfield", owner: "Medical" }
-          ],
-          cellOutputs: [outIntel, outPop]
-        };
-        copHistory = [cop, ...copHistory];
-        metrics.activeCells = 0;
-        addLog("CEREBRAS", JSON.stringify(cop));
-        addLog("ORCH", "Commander synthesized COP successfully in 430ms.");
-
-        // P25: Update mock stats counters for Commander reasoning
-        updateDemoStats({
-          inferences: stats.inferences + 1,
-          tokensIn: stats.tokensIn + 1250,
-          tokensOut: stats.tokensOut + 320,
-          eventsReplayed: timelineEvents.length
-        });
-      }, 150);
-    }, 380);
   }
 
   function classifyEvent(type) {
@@ -867,7 +548,7 @@
 
 <div class="dashboard-container">
   <!-- Top HUD panel -->
-  <HUD {state} {metrics} {demoMode} {currentProvider} {switchingProvider} on:changeProvider={changeProvider} />
+  <HUD {state} {metrics} {isDisconnected} {isInitialized} {stats} {currentProvider} {switchingProvider} on:changeProvider={changeProvider} />
 
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">
@@ -875,9 +556,15 @@
       {state}
       activeEvent={timelineEvents.length > 0 ? timelineEvents[timelineEvents.length - 1] : null}
       {stats}
-      {demoMode}
+      {isDisconnected}
+      {isInitialized}
       {isPlaying}
       {speed}
+      latencyMs={metrics.latencyMs}
+      {currentProvider}
+      latencyByProvider={lastLatencyByProvider}
+      {totalDecisionMs}
+      totalByProvider={totalDecisionByProvider}
       on:play={handlePlay}
       on:step={handleStep}
       on:reset={handleReset}
@@ -975,3 +662,115 @@
     <MatrixFeed logs={matrixLogs} {currentProvider} />
   </div>
 </div>
+
+{#if !isInitialized}
+  <div class="overlay-container" class:fade-out={overlayFading}>
+    <div class="overlay-modal">
+      <div class="overlay-title">Initialize Command Center</div>
+      <div class="overlay-desc">
+        Select a disaster scenario to initialize the real-time AI emergency response system.
+      </div>
+      <div class="overlay-select-wrapper">
+        <select bind:value={selectedScenario} class="overlay-select">
+          <option value="cerebro-cascade">Cerebro Earthquake Cascade (M6.8)</option>
+        </select>
+      </div>
+      <button class="overlay-btn" on:click={initializeEOC} disabled={isDisconnected}>
+        {#if isDisconnected}
+          Connecting to EOC Backend...
+        {:else}
+          Initialize EOC Simulation
+        {/if}
+      </button>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .overlay-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(4, 5, 9, 0.85);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    opacity: 1;
+    transition: opacity 300ms ease;
+  }
+  .overlay-container.fade-out {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .overlay-modal {
+    background: rgba(13, 17, 30, 0.95);
+    border: 1px solid var(--panel-border-active);
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 450px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(0, 242, 254, 0.2);
+    animation: fadeIn 0.3s ease;
+  }
+  .overlay-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    background: linear-gradient(90deg, #00f2fe, #4facfe);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .overlay-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 20px;
+  }
+  .overlay-select-wrapper {
+    margin-bottom: 20px;
+  }
+  .overlay-select {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 0.875rem;
+    outline: none;
+    cursor: pointer;
+  }
+  .overlay-select:hover {
+    border-color: var(--panel-border-active);
+  }
+  .overlay-btn {
+    width: 100%;
+    background: linear-gradient(90deg, #00f2fe, #4facfe);
+    border: none;
+    border-radius: 6px;
+    color: #07090e;
+    font-weight: 700;
+    padding: 12px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+  }
+  .overlay-btn:hover:not(:disabled) {
+    box-shadow: 0 0 15px rgba(0, 242, 254, 0.5);
+    transform: translateY(-1px);
+  }
+  .overlay-btn:disabled {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    cursor: not-allowed;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+</style>

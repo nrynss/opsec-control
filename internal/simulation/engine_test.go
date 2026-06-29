@@ -127,7 +127,7 @@ func TestEngine_RunPaced(t *testing.T) {
 	// We use high speed to make test fast.
 	eng.SetSpeed(1000)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	err := eng.Run(ctx)
@@ -153,9 +153,12 @@ func TestEngine_PauseResume(t *testing.T) {
 
 	eng.Pause()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	done := make(chan error, 1)
 	go func() {
-		done <- eng.Run(context.Background())
+		done <- eng.Run(ctx)
 	}()
 
 	// Give the goroutine a moment to enter the paused state.
@@ -170,9 +173,15 @@ func TestEngine_PauseResume(t *testing.T) {
 	// Now resume; the Run should continue and finish the remaining event.
 	eng.Resume()
 
+	// Give it a moment to run and park at the end
+	time.Sleep(20 * time.Millisecond)
+
+	// Cancel context to force the parked runner to exit
+	cancel()
+
 	select {
 	case err := <-done:
-		if err != nil {
+		if err != nil && err != context.Canceled {
 			t.Fatalf("Run after resume failed: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
@@ -357,8 +366,8 @@ func TestEngine_StatsMethods(t *testing.T) {
 	}
 
 	eng.Reset()
-	if got := eng.Status(); got != "running" {
-		t.Errorf("after reset status = %q, want running", got)
+	if got := eng.Status(); got != "paused" {
+		t.Errorf("after reset status = %q, want paused", got)
 	}
 	if ms := eng.WallElapsedMS(); ms != 0 {
 		t.Errorf("wall after reset = %d, want 0", ms)
@@ -441,7 +450,7 @@ func TestEngine_StatusLifecycle(t *testing.T) {
 	}
 
 	eng.Reset()
-	if got := eng.Status(); got != "running" {
+	if got := eng.Status(); got != "paused" {
 		t.Errorf("after reset from complete: %q", got)
 	}
 }
@@ -513,5 +522,102 @@ func TestEngine_DeterminismFirewall_WallStats(t *testing.T) {
 	}
 	if e1.CurrentTime() != e2.CurrentTime() {
 		t.Error("current time diverged due to wall delays")
+	}
+}
+
+func TestEngine_ResetWakesParkedRunner(t *testing.T) {
+	bus := &mockBus{}
+	eng := New(bus)
+	sc := makeScenario([]contracts.Event{
+		{ID: "e1", Timestamp: 1, Source: "s", Type: contracts.EventMainshockOccurred, Confidence: 1},
+	})
+	_ = eng.Load(sc)
+	eng.SetSpeed(1000)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- eng.Run(ctx)
+	}()
+
+	// Let the scenario complete and park at the end
+	time.Sleep(20 * time.Millisecond)
+
+	// Verify it reached complete status
+	if eng.Status() != "complete" {
+		t.Errorf("expected complete status, got %q", eng.Status())
+	}
+
+	// Reset the engine. This should wake the parked runner and set it to paused.
+	eng.Reset()
+	eng.Resume() // Resume explicitly to allow replay
+
+	// Give it a moment to run the reset scenario and park at the end again
+	time.Sleep(20 * time.Millisecond)
+
+	if eng.Status() != "complete" {
+		t.Errorf("expected complete status after reset replay, got %q", eng.Status())
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil && err != context.Canceled {
+			t.Fatalf("Run exited with unexpected error: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Run did not exit after context cancellation")
+	}
+
+	// The event should have been published twice (once for initial run, once for reset run)
+	pubs := bus.published()
+	if len(pubs) != 2 {
+		t.Errorf("expected 2 published events, got %d", len(pubs))
+	}
+}
+
+func TestEngine_LiveFlowSimulator(t *testing.T) {
+	bus := &mockBus{}
+	eng := New(bus)
+	sc := makeScenario([]contracts.Event{
+		{ID: "e1", Timestamp: 0, Source: "s", Type: contracts.EventMainshockOccurred, Confidence: 1},
+		{ID: "e2", Timestamp: 10, Source: "s", Type: contracts.EventBridgeClosed, Confidence: 1},
+	})
+	_ = eng.Load(sc)
+	eng.SetSpeed(4)
+	eng.Pause()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = eng.Run(ctx)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	if eng.Status() != "paused" {
+		t.Fatalf("expected paused, got %q", eng.Status())
+	}
+
+	eng.Reset()
+	time.Sleep(10 * time.Millisecond)
+	if eng.Status() != "paused" {
+		t.Fatalf("expected paused after reset, got %q", eng.Status())
+	}
+
+	eng.Resume()
+	time.Sleep(20 * time.Millisecond)
+	if eng.Status() != "running" {
+		t.Fatalf("expected running after resume, got %q", eng.Status())
+	}
+
+	pubs := bus.published()
+	if len(pubs) < 1 {
+		t.Fatal("e1 was not published after resume")
+	}
+	if pubs[0].ID != "e1" {
+		t.Errorf("expected e1 to be published, got %s", pubs[0].ID)
 	}
 }

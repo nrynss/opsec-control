@@ -382,6 +382,7 @@ func main() {
 		log.Fatalf("[eoc] sim load: %v", err)
 	}
 	sim.SetSpeed(*speed)
+	sim.Pause() // Start in paused state (time 0)
 	go func() {
 		if err := sim.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("[eoc] sim stopped: %v", err)
