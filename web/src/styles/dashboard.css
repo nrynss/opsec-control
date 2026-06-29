@@ -217,7 +217,7 @@ body {
 /* Playback Control Buttons */
 .playback-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
@@ -976,6 +976,16 @@ body {
   border-radius: 3px;
   box-shadow: 0 0 8px #00f2fe;
   transition: width 0.3s ease;
+}
+
+.progress-bar-track.paused .progress-bar-fill {
+  background: linear-gradient(90deg, #ffcc00, #ff9900);
+  box-shadow: 0 0 4px #ffcc00;
+}
+
+.progress-bar-track.complete .progress-bar-fill {
+  background: linear-gradient(90deg, var(--color-nominal), #00cc6a);
+  box-shadow: 0 0 8px var(--color-nominal);
 }
 
 .telemetry-grid {

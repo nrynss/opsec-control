@@ -28,6 +28,9 @@
   $: endBound = demoMode ? 60 : Math.max(170, currentTime, observedMax);
   $: progressPct = endBound > 0 ? Math.min(100, Math.max(0, (currentTime / endBound) * 100)) : 0;
 
+  $: isPaused = !isPlaying;
+  $: isComplete = !demoMode && stats && (stats.status === 'complete' || (currentTime >= endBound && endBound > 0));
+
   async function callEndpoint(path, method = "POST", body = null) {
     try {
       var options = { method: method };
@@ -126,12 +129,6 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
     </button>
 
-    <!-- Reset Button -->
-    <button class="playback-btn" on:click={reset} title="Reset Simulation">
-      <!-- Reset Icon -->
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2.5 2v6h6M21.5 22v-6h-6"></path><path d="M22 11.5A10 10 0 0 0 9.5 3.5M2 12.5a10 10 0 0 0 12.5 8.5"></path></svg>
-    </button>
-
     <!-- Load Button -->
     <button class="playback-btn" on:click={load} title="Load Scenario">
       <!-- Load Icon -->
@@ -174,7 +171,7 @@
       <span class="progress-current">+{currentTime}s ({formatTime(currentTime)})</span>
       <span>+{endBound}s</span>
     </div>
-    <div class="progress-bar-track">
+    <div class="progress-bar-track" class:paused={isPaused} class:complete={isComplete}>
       <div class="progress-bar-fill" style="width: {progressPct}%"></div>
     </div>
   </div>

@@ -415,6 +415,15 @@
     }
   }
 
+  const DEMO_MAX_TIME = 60;
+
+  function updateDemoStats(updates) {
+    for (var k in updates) {
+      stats[k] = updates[k];
+    }
+    stats = stats;
+  }
+
   function startDemoMode() {
     demoMode = true;
     isPlaying = true;
@@ -427,8 +436,7 @@
     var play = event.detail;
     isPlaying = play;
     if (demoMode) {
-      stats.status = play ? "running" : "paused";
-      stats = stats;
+      updateDemoStats({ status: play ? "running" : "paused" });
       if (play) {
         demoWallStart = Date.now();
         resumeDemoMode();
@@ -443,10 +451,9 @@
   }
 
   function handleStep() {
+    isPlaying = false;
     if (demoMode) {
-      isPlaying = false;
-      stats.status = "paused";
-      stats = stats;
+      updateDemoStats({ status: "paused" });
       if (demoWallStart) {
         demoAccumulatedWallTime += Date.now() - demoWallStart;
       }
@@ -462,17 +469,27 @@
       speed = 1.0;
       loadNominalState();
       resumeDemoMode();
+    } else {
+      // Optimistic immediate clear for live reset (snappy All Clear UX);
+      // backend reset + WS broadcast will confirm/sync
+      isPlaying = false;
+      speed = 1.0;
+      loadNominalState();
     }
   }
 
   function handleLoad(event) {
     var name = event.detail;
+    isPlaying = false;
+    speed = 1.0;
     if (demoMode) {
-      isPlaying = false;
-      speed = 1.0;
       loadNominalState();
       pauseDemoMode();
       addLog("SYSTEM", `Loaded mock scenario: ${name}`);
+    } else {
+      // Optimistic clear for live scenario load
+      loadNominalState();
+      addLog("SYSTEM", `Loading scenario: ${name}`);
     }
   }
 
@@ -480,8 +497,7 @@
     var s = event.detail;
     speed = s;
     if (demoMode) {
-      stats.speed = s;
-      stats = stats;
+      updateDemoStats({ speed: s });
       if (isPlaying) {
         resumeDemoMode();
       }
@@ -505,16 +521,18 @@
   function tickDemo() {
     state.time += 1;
     state = state;
-    stats.currentTime = state.time;
-    stats.elapsedTime = state.time;
     
     var wall = demoAccumulatedWallTime;
     if (demoWallStart) {
       wall += (Date.now() - demoWallStart);
     }
-    stats.wallElapsed = wall;
-    stats.eventsReplayed = timelineEvents.length;
-    stats = stats;
+
+    updateDemoStats({
+      currentTime: state.time,
+      elapsedTime: state.time,
+      wallElapsed: wall,
+      eventsReplayed: timelineEvents.length
+    });
 
     // Act 1: shock at t=6
     if (state.time === 6) {
@@ -528,8 +546,8 @@
     else if (state.time === 34) {
       triggerAct3();
     }
-    // Loop replay at t=60
-    else if (state.time >= 60) {
+    // Loop replay at t=DEMO_MAX_TIME
+    else if (state.time >= DEMO_MAX_TIME) {
       state.time = 0;
       loadNominalState();
     }
@@ -589,11 +607,12 @@
       addLog("CEREBRAS", JSON.stringify(outComm));
 
       // P25: Update mock stats counters for cells reasoning
-      stats.inferences += 5;
-      stats.tokensIn += 1200;
-      stats.tokensOut += 950;
-      stats.eventsReplayed = timelineEvents.length;
-      stats = stats;
+      updateDemoStats({
+        inferences: stats.inferences + 5,
+        tokensIn: stats.tokensIn + 1200,
+        tokensOut: stats.tokensOut + 950,
+        eventsReplayed: timelineEvents.length
+      });
 
       // Commander synthesizes COP
       setTimeout(() => {
@@ -615,11 +634,12 @@
         addLog("ORCH", "Commander synthesized COP successfully in 520ms.");
 
         // P25: Update mock stats counters for Commander reasoning
-        stats.inferences += 1;
-        stats.tokensIn += 2000;
-        stats.tokensOut += 400;
-        stats.eventsReplayed = timelineEvents.length;
-        stats = stats;
+        updateDemoStats({
+          inferences: stats.inferences + 1,
+          tokensIn: stats.tokensIn + 2000,
+          tokensOut: stats.tokensOut + 400,
+          eventsReplayed: timelineEvents.length
+        });
       }, 200);
 
     }, 450);
@@ -660,11 +680,12 @@
       addLog("CEREBRAS", JSON.stringify(outPop));
 
       // P25: Update mock stats counters for cells reasoning
-      stats.inferences += 2;
-      stats.tokensIn += 600;
-      stats.tokensOut += 500;
-      stats.eventsReplayed = timelineEvents.length;
-      stats = stats;
+      updateDemoStats({
+        inferences: stats.inferences + 2,
+        tokensIn: stats.tokensIn + 600,
+        tokensOut: stats.tokensOut + 500,
+        eventsReplayed: timelineEvents.length
+      });
 
       setTimeout(() => {
         if (!demoMode || stats.currentTime === 0) return;
@@ -684,11 +705,12 @@
         addLog("ORCH", "Commander synthesized COP successfully in 410ms.");
 
         // P25: Update mock stats counters for Commander reasoning
-        stats.inferences += 1;
-        stats.tokensIn += 1100;
-        stats.tokensOut += 300;
-        stats.eventsReplayed = timelineEvents.length;
-        stats = stats;
+        updateDemoStats({
+          inferences: stats.inferences + 1,
+          tokensIn: stats.tokensIn + 1100,
+          tokensOut: stats.tokensOut + 300,
+          eventsReplayed: timelineEvents.length
+        });
       }, 150);
     }, 350);
   }
@@ -728,11 +750,12 @@
       addLog("CEREBRAS", JSON.stringify(outPop));
 
       // P25: Update mock stats counters for cells reasoning
-      stats.inferences += 2;
-      stats.tokensIn += 700;
-      stats.tokensOut += 550;
-      stats.eventsReplayed = timelineEvents.length;
-      stats = stats;
+      updateDemoStats({
+        inferences: stats.inferences + 2,
+        tokensIn: stats.tokensIn + 700,
+        tokensOut: stats.tokensOut + 550,
+        eventsReplayed: timelineEvents.length
+      });
 
       setTimeout(() => {
         if (!demoMode || stats.currentTime === 0) return;
@@ -752,11 +775,12 @@
         addLog("ORCH", "Commander synthesized COP successfully in 430ms.");
 
         // P25: Update mock stats counters for Commander reasoning
-        stats.inferences += 1;
-        stats.tokensIn += 1250;
-        stats.tokensOut += 320;
-        stats.eventsReplayed = timelineEvents.length;
-        stats = stats;
+        updateDemoStats({
+          inferences: stats.inferences + 1,
+          tokensIn: stats.tokensIn + 1250,
+          tokensOut: stats.tokensOut + 320,
+          eventsReplayed: timelineEvents.length
+        });
       }, 150);
     }, 380);
   }
