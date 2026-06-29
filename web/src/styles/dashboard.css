@@ -730,44 +730,7 @@ body {
   animation: pulse-dot 1s infinite alternate;
 }
 
-.source-toggle {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 3px;
-}
 
-.source-btn {
-  background: none;
-  border: none;
-  border-radius: 4px;
-  color: var(--text-muted);
-  font-family: var(--font-sans);
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 6px;
-  cursor: pointer;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
-  outline: none;
-}
-
-.source-btn:hover {
-  color: var(--text-primary);
-}
-
-.source-btn.active {
-  background: rgba(0, 242, 254, 0.1);
-  color: #00f2fe;
-  border: 1px solid rgba(0, 242, 254, 0.2);
-  box-shadow: inset 0 0 4px rgba(0, 242, 254, 0.1);
-}
 
 .upload-dropzone {
   border: 2px dashed var(--panel-border);

@@ -126,6 +126,7 @@
     } catch (err) {
       uploadState = "error";
       statusMessage = err.message || "Failed to parse images";
+      thumbnail = null;
       dispatch('error', statusMessage);
     }
   }
@@ -169,6 +170,7 @@
     } catch (err) {
       uploadState = "error";
       statusMessage = err.message;
+      thumbnail = null;
       dispatch('error', statusMessage);
     }
   }
