@@ -29,7 +29,7 @@ func TestPerceptionMock(t *testing.T) {
 				Data:   []byte("drone_vora_bridge_collapsed.png"),
 			},
 			wantType:   contracts.EventBridgeCollapsed,
-			wantSource: "Cerebras-Perception-drone",
+			wantSource: "cerebras-Perception-drone",
 		},
 		{
 			name: "Highgate masonry collapse",
@@ -38,7 +38,7 @@ func TestPerceptionMock(t *testing.T) {
 				Data:   []byte("satellite_highgate_masonry_collapse.png"),
 			},
 			wantType:   contracts.EventBuildingCollapsed,
-			wantSource: "Cerebras-Perception-satellite",
+			wantSource: "cerebras-Perception-satellite",
 		},
 		{
 			name: "Southport levee breach",
@@ -47,7 +47,7 @@ func TestPerceptionMock(t *testing.T) {
 				Data:   []byte("drone_southport_levee_breach.png"),
 			},
 			wantType:   contracts.EventLeveeBreached,
-			wantSource: "Cerebras-Perception-drone",
+			wantSource: "cerebras-Perception-drone",
 		},
 		{
 			name: "Default drone generic",
@@ -56,7 +56,7 @@ func TestPerceptionMock(t *testing.T) {
 				Data:   []byte("unknown_image_bytes"),
 			},
 			wantType:   contracts.EventRoadBlocked,
-			wantSource: "Cerebras-Perception-drone",
+			wantSource: "cerebras-Perception-drone",
 		},
 	}
 

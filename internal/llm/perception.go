@@ -41,6 +41,9 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 	// Read content as string to see if we match key mock triggers
 	dataStr := string(input.Data)
 
+	// Source prefix reflects the active provider (P9).
+	srcPrefix := fmt.Sprintf("%s-Perception", c.Provider())
+
 	var events []contracts.Event
 
 	switch {
@@ -48,7 +51,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 		events = append(events, contracts.Event{
 			ID:         contracts.EventID("evt-perc-vora"),
 			Timestamp:  0, // Will be set by EOC runner
-			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
+			Source:     fmt.Sprintf("%s-%s", srcPrefix, input.Source),
 			Type:       contracts.EventBridgeCollapsed,
 			Confidence: 0.98,
 			Payload:    json.RawMessage(`{"bridgeId": "vora"}`),
@@ -57,7 +60,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 		events = append(events, contracts.Event{
 			ID:         contracts.EventID("evt-perc-highgate"),
 			Timestamp:  0,
-			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
+			Source:     fmt.Sprintf("%s-%s", srcPrefix, input.Source),
 			Type:       contracts.EventBuildingCollapsed,
 			Confidence: 0.92,
 			Payload:    json.RawMessage(`{"sector": "highgate"}`),
@@ -66,7 +69,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 		events = append(events, contracts.Event{
 			ID:         contracts.EventID("evt-perc-levee"),
 			Timestamp:  0,
-			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
+			Source:     fmt.Sprintf("%s-%s", srcPrefix, input.Source),
 			Type:       contracts.EventLeveeBreached,
 			Confidence: 0.95,
 			Payload:    json.RawMessage(`{"sector": "southport"}`),
@@ -77,7 +80,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 			events = append(events, contracts.Event{
 				ID:         contracts.EventID("evt-perc-gen-sat"),
 				Timestamp:  0,
-				Source:     "Cerebras-Perception-satellite",
+				Source:     fmt.Sprintf("%s-satellite", srcPrefix),
 				Type:       contracts.EventBuildingCollapsed,
 				Confidence: 0.88,
 				Payload:    json.RawMessage(`{"sector": "central"}`),
@@ -86,7 +89,7 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 			events = append(events, contracts.Event{
 				ID:         contracts.EventID("evt-perc-gen-drone"),
 				Timestamp:  0,
-				Source:     "Cerebras-Perception-drone",
+				Source:     fmt.Sprintf("%s-drone", srcPrefix),
 				Type:       contracts.EventRoadBlocked,
 				Confidence: 0.91,
 				Payload:    json.RawMessage(`{"roadId": "R-WEST-1"}`),
@@ -242,7 +245,7 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 		events = append(events, contracts.Event{
 			ID:         contracts.EventID(fmt.Sprintf("evt-perc-%s-%d", hashStr, i)),
 			Timestamp:  0, // Set by the runner
-			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
+			Source:     fmt.Sprintf("%s-Perception-%s", provider, input.Source),
 			Type:       normalizeEventType(re.Type),
 			Confidence: re.Confidence,
 			Payload:    re.Payload,
