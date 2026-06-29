@@ -279,9 +279,13 @@
 
       if (payload.cellOutputs) {
         payload.cellOutputs.forEach(out => {
-          cellStatuses[out.agent] = "done";
-          if (!cellHistory[out.agent].some(item => item.stateVersion === out.stateVersion && item.summary === out.summary)) {
-            cellHistory[out.agent] = [out, ...cellHistory[out.agent]];
+          if (cellStatuses[out.agent] !== undefined) {
+            cellStatuses[out.agent] = "done";
+          }
+          if (cellHistory[out.agent] !== undefined) {
+            if (!cellHistory[out.agent].some(item => item.stateVersion === out.stateVersion && item.summary === out.summary)) {
+              cellHistory[out.agent] = [out, ...cellHistory[out.agent]];
+            }
           }
         });
       }
@@ -289,9 +293,13 @@
     }
 
     if (kind === "cell_output" || (!kind && payload.agent && payload.recommendations)) {
-      cellStatuses[payload.agent] = "done";
-      if (!cellHistory[payload.agent].some(item => item.stateVersion === payload.stateVersion && item.summary === payload.summary)) {
-        cellHistory[payload.agent] = [payload, ...cellHistory[payload.agent]];
+      if (cellStatuses[payload.agent] !== undefined) {
+        cellStatuses[payload.agent] = "done";
+      }
+      if (cellHistory[payload.agent] !== undefined) {
+        if (!cellHistory[payload.agent].some(item => item.stateVersion === payload.stateVersion && item.summary === payload.summary)) {
+          cellHistory[payload.agent] = [payload, ...cellHistory[payload.agent]];
+        }
       }
       return;
     }
