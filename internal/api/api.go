@@ -229,7 +229,8 @@ func (s *Server) handlePostPerception(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer file.Close()
-		data, readErr = io.ReadAll(file)
+		lr := io.LimitReader(file, maxImageSize+1)
+		data, readErr = io.ReadAll(lr)
 		if readErr == nil && len(data) > maxImageSize {
 			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
 			return
