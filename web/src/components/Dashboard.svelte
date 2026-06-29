@@ -514,7 +514,7 @@
   <div class="controls-area">
     <PlaybackControl {state} activeEvent={timelineEvents[0]} />
     
-    <PerceptionUpload {state} on:uploading={handleUploading} on:events={handlePerceptionEvents} on:error={handlePerceptionError} />
+    <PerceptionUpload on:uploading={handleUploading} on:events={handlePerceptionEvents} on:error={handlePerceptionError} />
     
     <!-- Timeline Event log -->
     <div class="control-panel" style="flex: 1; display: flex; flex-direction: column;">

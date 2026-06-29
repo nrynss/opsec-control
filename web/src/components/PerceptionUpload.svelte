@@ -50,6 +50,13 @@
 
   // Create local preview thumbnail for snazzy UX
   function processFile(file) {
+    if (file.size > 10 * 1024 * 1024) {
+      uploadState = "error";
+      statusMessage = "Payload too large (max 10MB)";
+      dispatch('error', statusMessage);
+      return;
+    }
+
     var reader = new FileReader();
     reader.onload = function(e) {
       thumbnail = e.target.result;
