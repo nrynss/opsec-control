@@ -604,7 +604,7 @@
 
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">
-    <PlaybackControl {state} activeEvent={timelineEvents[0]} />
+    <PlaybackControl {state} activeEvent={timelineEvents[timelineEvents.length - 1]} />
     
     <PerceptionUpload on:uploading={handleUploading} on:events={handlePerceptionEvents} on:error={handlePerceptionError} />
     
@@ -643,7 +643,7 @@
   <!-- Right Sidebar: Commander Synthesis & JSON Matrix Stream -->
   <div class="right-sidebar">
     <!-- Commander panel -->
-    <div class="commander-panel">
+    <div class="commander-panel" style="display: flex; flex-direction: column;">
       <div class="commander-header">
         <span class="commander-title">Commander Cell (COP)</span>
         {#if cop.overallRisk && cop.overallRisk !== 'Low'}
@@ -651,23 +651,29 @@
         {/if}
       </div>
       
+      <!-- Current Summary -->
+      <div class="cop-summary" style="margin-bottom: 8px; border-bottom: 1px dashed rgba(139, 92, 246, 0.2); padding-bottom: 8px; max-height: 80px; overflow-y: auto;">
+        {cop.summary || "EOC system nominal. Standing by for telemetry."}
+      </div>
+
+      <!-- Prior COPs History -->
+      <div style="font-size: 0.75rem; font-weight: 700; color: #a78bfa; margin-top: 4px; margin-bottom: 4px;">COP History</div>
       <div class="cop-history-list">
-        {#each copHistory as item, idx}
+        {#each copHistory.slice(1) as item, idx}
           <div class="cop-history-item">
             <div style="display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 700; color: #a78bfa;">
-              <span>#{copHistory.length - idx} COP</span>
+              <span>#{copHistory.length - 1 - idx} COP</span>
               {#if item.overallRisk && item.overallRisk !== 'Low'}
                 <span style="color: var(--color-critical); font-weight: 700;">{item.overallRisk}</span>
               {/if}
             </div>
-            <div class="cop-summary" style="margin-top: 4px;">
+            <div class="cop-summary" style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">
               {item.summary}
             </div>
             {#if item.prioritizedActions && item.prioritizedActions.length > 0}
-              <div style="font-size: 0.75rem; font-weight: 700; color: #a78bfa; margin-top: 4px; border-top: 1px solid rgba(139, 92, 246, 0.1); padding-top: 4px;">Prioritized Actions</div>
               <div class="cop-actions" style="margin-top: 4px;">
                 {#each item.prioritizedActions as action}
-                  <div class="cop-action-item">
+                  <div class="cop-action-item" style="font-size: 0.7rem;">
                     <span style="font-weight: 700; color: #d8b4fe;">#{action.priority}</span>
                     <span style="color: var(--text-primary);">{action.action}</span>
                   </div>
@@ -676,9 +682,9 @@
             {/if}
           </div>
         {/each}
-        {#if copHistory.length === 0}
-          <div style="font-size: 0.75rem; color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px;">
-            EOC system nominal. Standing by for telemetry.
+        {#if copHistory.length <= 1}
+          <div style="font-size: 0.7rem; color: var(--text-muted); font-style: italic; text-align: center; margin-top: 10px;">
+            No prior COP history.
           </div>
         {/if}
       </div>
