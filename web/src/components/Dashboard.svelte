@@ -604,7 +604,7 @@
 
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">
-    <PlaybackControl {state} activeEvent={timelineEvents[timelineEvents.length - 1]} />
+    <PlaybackControl {state} activeEvent={timelineEvents.length > 0 ? timelineEvents[timelineEvents.length - 1] : null} />
     
     <PerceptionUpload on:uploading={handleUploading} on:events={handlePerceptionEvents} on:error={handlePerceptionError} />
     
@@ -678,7 +678,7 @@
     </div>
 
     <!-- SV Map -->
-    <Map {state} activeEvent={timelineEvents[timelineEvents.length - 1]} />
+    <Map {state} activeEvent={timelineEvents.length > 0 ? timelineEvents[timelineEvents.length - 1] : null} />
 
     <!-- Specialists Grid -->
     <div class="specialists-panel">
