@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"sync"
+	"time"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
 )
@@ -50,6 +51,9 @@ type cellResult struct {
 // FanOut returns ctx.Err() promptly rather than blocking until every cell
 // finishes on its own.
 func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trigger contracts.Event, wake []contracts.CellKind) (contracts.CommonOperationalPicture, error) {
+	startTime := time.Now()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	// Filter out the Commander — it runs after specialists, not in parallel
 	// with them. The Commander ALWAYS synthesises when registered, regardless
@@ -126,15 +130,20 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 	// --- Phase 2: Commander synthesis ---
 	commander, hasCommander := e.cells[contracts.CellCommander]
 	if !hasCommander {
+		latencyMS := time.Since(startTime).Milliseconds()
 		if len(specialistOutputs) == 0 {
 			return contracts.CommonOperationalPicture{
 				Summary:      "No cells woken for this event.",
 				StateVersion: snapshot.Version,
 				OverallRisk:  contracts.RiskLow,
+				Metrics: contracts.COPMetrics{
+					FanOutLatencyMS: latencyMS,
+					CellCount:       0,
+				},
 			}, nil
 		}
 		// No Commander registered — return a best-effort COP from specialist outputs.
-		return buildFallbackCOP(snapshot, specialistOutputs, nil), nil
+		return buildFallbackCOP(snapshot, specialistOutputs, nil, latencyMS), nil
 	}
 
 	commanderInput := contracts.CellInput{
@@ -145,10 +154,11 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 	}
 
 	commanderOut, cmdErr := commander.Analyze(ctx, commanderInput)
+	latencyMS := time.Since(startTime).Milliseconds()
 	if cmdErr != nil {
 		// Commander failed — return a best-effort COP but surface the error in
 		// the summary so the failure is visible on the HUD (not silently swallowed).
-		return buildFallbackCOP(snapshot, specialistOutputs, cmdErr), nil
+		return buildFallbackCOP(snapshot, specialistOutputs, cmdErr, latencyMS), nil
 	}
 
 	// Build the COP from the Commander's output.
@@ -157,6 +167,7 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 		StateVersion: snapshot.Version,
 		OverallRisk:  commanderOut.RiskLevel,
 		CellOutputs:  specialistOutputs,
+		Metrics:      computeCOPMetrics(latencyMS, specialistOutputs, &commanderOut),
 	}
 
 	// Commander recommendations become prioritized actions.
@@ -171,9 +182,49 @@ func (e *Engine) FanOut(ctx context.Context, snapshot contracts.WorldState, trig
 	return cop, nil
 }
 
+// computeCOPMetrics aggregates metrics across a fan-out run.
+func computeCOPMetrics(latencyMS int64, specialists []contracts.CellOutput, commander *contracts.CellOutput) contracts.COPMetrics {
+	var totalIn, totalOut int
+	var peak float64
+	cellCount := len(specialists)
+
+	for _, out := range specialists {
+		totalIn += out.Metrics.TokensIn
+		totalOut += out.Metrics.TokensOut
+		if out.Metrics.TokensPerSec > peak {
+			peak = out.Metrics.TokensPerSec
+		}
+	}
+
+	if commander != nil {
+		cellCount++
+		totalIn += commander.Metrics.TokensIn
+		totalOut += commander.Metrics.TokensOut
+		if commander.Metrics.TokensPerSec > peak {
+			peak = commander.Metrics.TokensPerSec
+		}
+	}
+
+	var aggregate float64
+	if latencyMS > 0 {
+		aggregate = float64(totalOut) / (float64(latencyMS) / 1000.0)
+	} else {
+		aggregate = peak
+	}
+
+	return contracts.COPMetrics{
+		FanOutLatencyMS:       latencyMS,
+		TotalTokensIn:         totalIn,
+		TotalTokensOut:        totalOut,
+		PeakTokensPerSec:      peak,
+		AggregateTokensPerSec: aggregate,
+		CellCount:             cellCount,
+	}
+}
+
 // buildFallbackCOP constructs a best-effort COP when the Commander is missing
 // or failed. If cmdErr is non-nil, the failure is surfaced in the summary.
-func buildFallbackCOP(snapshot contracts.WorldState, outputs []contracts.CellOutput, cmdErr error) contracts.CommonOperationalPicture {
+func buildFallbackCOP(snapshot contracts.WorldState, outputs []contracts.CellOutput, cmdErr error, latencyMS int64) contracts.CommonOperationalPicture {
 	// Determine overall risk as the max across all specialist outputs.
 	overallRisk := contracts.RiskLow
 	riskOrder := map[contracts.RiskLevel]int{
@@ -198,5 +249,6 @@ func buildFallbackCOP(snapshot contracts.WorldState, outputs []contracts.CellOut
 		StateVersion: snapshot.Version,
 		OverallRisk:  overallRisk,
 		CellOutputs:  outputs,
+		Metrics:      computeCOPMetrics(latencyMS, outputs, nil),
 	}
 }

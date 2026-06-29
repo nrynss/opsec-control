@@ -446,3 +446,122 @@ func (c *capturingCell) Analyze(ctx context.Context, input contracts.CellInput) 
 	}
 	return c.inner.Analyze(ctx, input)
 }
+
+func TestFanOut_AccumulatesCOPMetrics(t *testing.T) {
+	infra := newMockCell(contracts.CellInfrastructure, "Bridges down", contracts.RiskHigh)
+	infra.output.Metrics = contracts.CellMetrics{
+		TokensIn:     100,
+		TokensOut:    200,
+		TokensPerSec: 1500.0,
+		LatencyMS:    150,
+	}
+
+	medical := newMockCell(contracts.CellMedical, "Casualty surge", contracts.RiskCritical)
+	medical.output.Metrics = contracts.CellMetrics{
+		TokensIn:     150,
+		TokensOut:    250,
+		TokensPerSec: 2000.0,
+		LatencyMS:    120,
+	}
+
+	commander := newMockCell(contracts.CellCommander, "COP synthesis", contracts.RiskCritical)
+	commander.output.Metrics = contracts.CellMetrics{
+		TokensIn:     50,
+		TokensOut:    100,
+		TokensPerSec: 1000.0,
+		LatencyMS:    80,
+	}
+
+	cells := map[contracts.CellKind]contracts.Cell{
+		contracts.CellInfrastructure: infra,
+		contracts.CellMedical:        medical,
+		contracts.CellCommander:      commander,
+	}
+
+	engine := NewEngine(cells)
+
+	wake := []contracts.CellKind{
+		contracts.CellInfrastructure,
+		contracts.CellMedical,
+		contracts.CellCommander,
+	}
+
+	cop, err := engine.FanOut(context.Background(), makeSnapshot(42), makeTrigger(), wake)
+	if err != nil {
+		t.Fatalf("FanOut failed: %v", err)
+	}
+
+	metrics := cop.Metrics
+	if metrics.TotalTokensIn != 300 {
+		t.Errorf("expected TotalTokensIn 300, got %d", metrics.TotalTokensIn)
+	}
+
+	if metrics.TotalTokensOut != 550 {
+		t.Errorf("expected TotalTokensOut 550, got %d", metrics.TotalTokensOut)
+	}
+
+	if metrics.PeakTokensPerSec != 2000.0 {
+		t.Errorf("expected PeakTokensPerSec 2000.0, got %f", metrics.PeakTokensPerSec)
+	}
+
+	if metrics.CellCount != 3 {
+		t.Errorf("expected CellCount 3, got %d", metrics.CellCount)
+	}
+
+	if metrics.FanOutLatencyMS < 0 {
+		t.Errorf("expected non-negative FanOutLatencyMS, got %d", metrics.FanOutLatencyMS)
+	}
+
+	var expectedAggregate float64
+	if metrics.FanOutLatencyMS > 0 {
+		expectedAggregate = float64(metrics.TotalTokensOut) / (float64(metrics.FanOutLatencyMS) / 1000.0)
+	} else {
+		expectedAggregate = metrics.PeakTokensPerSec
+	}
+	if metrics.AggregateTokensPerSec != expectedAggregate {
+		t.Errorf("expected AggregateTokensPerSec %f, got %f", expectedAggregate, metrics.AggregateTokensPerSec)
+	}
+}
+
+func TestFanOut_FallbackCOPMetrics(t *testing.T) {
+	// Test metrics calculation on fallback path (no commander)
+	infra := newMockCell(contracts.CellInfrastructure, "Bridges down", contracts.RiskHigh)
+	infra.output.Metrics = contracts.CellMetrics{
+		TokensIn:     100,
+		TokensOut:    200,
+		TokensPerSec: 1500.0,
+		LatencyMS:    150,
+	}
+
+	cells := map[contracts.CellKind]contracts.Cell{
+		contracts.CellInfrastructure: infra,
+	}
+
+	engine := NewEngine(cells)
+
+	wake := []contracts.CellKind{
+		contracts.CellInfrastructure,
+	}
+
+	cop, err := engine.FanOut(context.Background(), makeSnapshot(42), makeTrigger(), wake)
+	if err != nil {
+		t.Fatalf("FanOut failed: %v", err)
+	}
+
+	metrics := cop.Metrics
+	if metrics.TotalTokensIn != 100 {
+		t.Errorf("expected TotalTokensIn 100, got %d", metrics.TotalTokensIn)
+	}
+
+	if metrics.TotalTokensOut != 200 {
+		t.Errorf("expected TotalTokensOut 200, got %d", metrics.TotalTokensOut)
+	}
+
+	if metrics.PeakTokensPerSec != 1500.0 {
+		t.Errorf("expected PeakTokensPerSec 1500.0, got %f", metrics.PeakTokensPerSec)
+	}
+
+	if metrics.CellCount != 1 {
+		t.Errorf("expected CellCount 1, got %d", metrics.CellCount)
+	}
+}
