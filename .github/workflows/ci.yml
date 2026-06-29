@@ -4,7 +4,18 @@ name: ci
 on:
   push:
     branches: [main]
+    # Skip CI for docs/text-only changes. A commit that ALSO touches code still
+    # runs the full pipeline — runs are skipped only when EVERY changed path
+    # matches one of these patterns.
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "LICENSE"
   workflow_dispatch: # manual "Run workflow" button (deploy on demand)
 
 jobs:
