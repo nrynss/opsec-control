@@ -68,6 +68,23 @@
   var demoTimer = null;
   var demoStep = 0;
 
+  // P25 Playback and Telemetry State
+  var isPlaying = false;
+  var speed = 1.0;
+  var stats = {
+    status: "running",
+    currentTime: 0,
+    elapsedTime: 0,
+    wallElapsed: 0,
+    eventsReplayed: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    inferences: 0,
+    speed: 1.0
+  };
+  var demoWallStart = null;
+  var demoAccumulatedWallTime = 0;
+
   // Initialize EOC default nominal state
   function loadNominalState() {
     state = {
@@ -117,6 +134,25 @@
     metrics = { activeCells: 0, tokensPerSec: 0, latencyMs: 0, tickTokens: 0 };
     timelineEvents = [];
     matrixLogs = [{ prefix: "SYSTEM", content: "Cerebro command center ready. Listening on /stream." }];
+
+    // P25: Reset stats to nominal faked or zero
+    stats = {
+      status: isPlaying ? "running" : "paused",
+      currentTime: 0,
+      elapsedTime: 0,
+      wallElapsed: 0,
+      eventsReplayed: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      inferences: 0,
+      speed: speed
+    };
+    demoAccumulatedWallTime = 0;
+    if (isPlaying && demoMode) {
+      demoWallStart = Date.now();
+    } else {
+      demoWallStart = null;
+    }
   }
 
   afterUpdate(() => {
@@ -140,8 +176,47 @@
     return () => {
       if (ws) ws.close();
       if (demoTimer) clearInterval(demoTimer);
+      stopStatsPolling();
     };
   });
+
+  var statsInterval = null;
+
+  function startStatsPolling() {
+    if (statsInterval) return;
+    statsInterval = setInterval(async () => {
+      if (demoMode || !ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      try {
+        var res = await fetch("/scenario/stats");
+        if (res.ok) {
+          var data = await res.json();
+          if (data && data.status !== "not_wired") {
+            stats = data;
+            // Sync isPlaying with stats status
+            if (stats.status === "running") {
+              isPlaying = true;
+            } else if (stats.status === "paused" || stats.status === "complete") {
+              isPlaying = false;
+            }
+            if (stats.speed !== undefined) {
+              speed = stats.speed;
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Stats polling failed:", e);
+      }
+    }, 1000);
+  }
+
+  function stopStatsPolling() {
+    if (statsInterval) {
+      clearInterval(statsInterval);
+      statsInterval = null;
+    }
+  }
 
   async function fetchInitialState() {
     try {
@@ -150,6 +225,7 @@
         state = await res.json();
         demoMode = false; // Real server is available
         addLog("SYSTEM", "Loaded snapshot from /state backend.");
+        startStatsPolling();
       }
     } catch (e) {
       // Keep demo mode active
@@ -212,6 +288,7 @@
           demoTimer = null;
         }
         addLog("WS", "Connected to live EventBus stream.");
+        startStatsPolling();
       };
 
       ws.onmessage = (event) => {
@@ -223,6 +300,7 @@
       };
 
       ws.onclose = () => {
+        stopStatsPolling();
         if (!demoMode) {
           addLog("SYSTEM", "WebSocket disconnected. Starting local simulation.");
           startDemoMode();
@@ -245,6 +323,13 @@
 
     // Add to Matrix logs
     addLog(kind ? `WS:${kind.toUpperCase()}` : "CEREBRAS", JSON.stringify(payload));
+
+    // P25: WS reset broadcast handling
+    if (kind === "reset") {
+      loadNominalState();
+      addLog("SYSTEM", "All Clear reset received. Feeds and clock cleared.");
+      return;
+    }
 
     // Route based on explicit kind if present, otherwise fallback to duck-typing
     if (kind === "provider") {
@@ -330,36 +415,124 @@
     }
   }
 
-  // --- High-Fidelity Demo Simulation Mode ---
   function startDemoMode() {
     demoMode = true;
-    demoStep = 0;
+    isPlaying = true;
+    speed = 1.0;
     loadNominalState();
+    resumeDemoMode();
+  }
 
+  function handlePlay(event) {
+    var play = event.detail;
+    isPlaying = play;
+    if (demoMode) {
+      stats.status = play ? "running" : "paused";
+      stats = stats;
+      if (play) {
+        demoWallStart = Date.now();
+        resumeDemoMode();
+      } else {
+        if (demoWallStart) {
+          demoAccumulatedWallTime += Date.now() - demoWallStart;
+        }
+        demoWallStart = null;
+        pauseDemoMode();
+      }
+    }
+  }
+
+  function handleStep() {
+    if (demoMode) {
+      isPlaying = false;
+      stats.status = "paused";
+      stats = stats;
+      if (demoWallStart) {
+        demoAccumulatedWallTime += Date.now() - demoWallStart;
+      }
+      demoWallStart = null;
+      pauseDemoMode();
+      tickDemo();
+    }
+  }
+
+  function handleReset() {
+    if (demoMode) {
+      isPlaying = true;
+      speed = 1.0;
+      loadNominalState();
+      resumeDemoMode();
+    }
+  }
+
+  function handleLoad(event) {
+    var name = event.detail;
+    if (demoMode) {
+      isPlaying = false;
+      speed = 1.0;
+      loadNominalState();
+      pauseDemoMode();
+      addLog("SYSTEM", `Loaded mock scenario: ${name}`);
+    }
+  }
+
+  function handleSpeed(event) {
+    var s = event.detail;
+    speed = s;
+    if (demoMode) {
+      stats.speed = s;
+      stats = stats;
+      if (isPlaying) {
+        resumeDemoMode();
+      }
+    }
+  }
+
+  function pauseDemoMode() {
+    if (demoTimer) {
+      clearInterval(demoTimer);
+      demoTimer = null;
+    }
+  }
+
+  function resumeDemoMode() {
     if (demoTimer) clearInterval(demoTimer);
-    
-    // Periodically advance the clock. Events trigger at specific times.
     demoTimer = setInterval(() => {
-      state.time += 1;
-      
-      // Act 1: shock at t=6
-      if (state.time === 6) {
-        triggerAct1();
-      }
-      // Act 2: aftershock + fire at t=18
-      else if (state.time === 18) {
-        triggerAct2();
-      }
-      // Act 3: flood breach at t=34
-      else if (state.time === 34) {
-        triggerAct3();
-      }
-      // Loop replay at t=60
-      else if (state.time >= 60) {
-        state.time = 0;
-        loadNominalState();
-      }
-    }, 1000);
+      tickDemo();
+    }, 1000 / speed);
+  }
+
+  function tickDemo() {
+    state.time += 1;
+    state = state;
+    stats.currentTime = state.time;
+    stats.elapsedTime = state.time;
+    
+    var wall = demoAccumulatedWallTime;
+    if (demoWallStart) {
+      wall += (Date.now() - demoWallStart);
+    }
+    stats.wallElapsed = wall;
+    stats.eventsReplayed = timelineEvents.length;
+    stats = stats;
+
+    // Act 1: shock at t=6
+    if (state.time === 6) {
+      triggerAct1();
+    }
+    // Act 2: aftershock + fire at t=18
+    else if (state.time === 18) {
+      triggerAct2();
+    }
+    // Act 3: flood breach at t=34
+    else if (state.time === 34) {
+      triggerAct3();
+    }
+    // Loop replay at t=60
+    else if (state.time >= 60) {
+      state.time = 0;
+      loadNominalState();
+    }
   }
 
   function triggerAct1() {
@@ -389,6 +562,7 @@
 
     // Cells finish simultaneously
     setTimeout(() => {
+      if (!demoMode || stats.currentTime === 0) return;
       cellStatuses.Intelligence = "done";
       var outIntel = { agent: "Intelligence", summary: "Aftershock forecast: 82% within 24 hours. Dam telemetry shows elevated stress.", riskLevel: "Medium", confidence: 0.9, stateVersion: state.version, recommendations: ["Continuous dam telemetry monitoring"], evidence: ["Substation offline indicators"] };
       cellHistory.Intelligence = [outIntel, ...cellHistory.Intelligence];
@@ -414,8 +588,16 @@
       cellHistory.Communications = [outComm, ...cellHistory.Communications];
       addLog("CEREBRAS", JSON.stringify(outComm));
 
+      // P25: Update mock stats counters for cells reasoning
+      stats.inferences += 5;
+      stats.tokensIn += 1200;
+      stats.tokensOut += 950;
+      stats.eventsReplayed = timelineEvents.length;
+      stats = stats;
+
       // Commander synthesizes COP
       setTimeout(() => {
+        if (!demoMode || stats.currentTime === 0) return;
         var latestOutputs = [outIntel, outInfra, outMed, outPop, outComm];
         cop = {
           summary: "Cerebro earthquake cascade. Two bridges closed, Highgate heavily damaged, Central General hospital at critical capacity.",
@@ -431,6 +613,13 @@
         metrics.activeCells = 0;
         addLog("CEREBRAS", JSON.stringify(cop));
         addLog("ORCH", "Commander synthesized COP successfully in 520ms.");
+
+        // P25: Update mock stats counters for Commander reasoning
+        stats.inferences += 1;
+        stats.tokensIn += 2000;
+        stats.tokensOut += 400;
+        stats.eventsReplayed = timelineEvents.length;
+        stats = stats;
       }, 200);
 
     }, 450);
@@ -459,6 +648,7 @@
     addLog("ORCH", "ANOMALY: South Span closed, fire active. Invoking specialists.");
 
     setTimeout(() => {
+      if (!demoMode || stats.currentTime === 0) return;
       cellStatuses.Infrastructure = "done";
       var outInfra = { agent: "Infrastructure", summary: "South Span restricted. Greenfield evacuation lanes compromised.", riskLevel: "Critical", confidence: 0.94, stateVersion: state.version, recommendations: ["Prioritize South Span structural inspection"], evidence: ["Bridge load sensors spike"] };
       cellHistory.Infrastructure = [outInfra, ...cellHistory.Infrastructure];
@@ -469,7 +659,15 @@
       cellHistory.Population = [outPop, ...cellHistory.Population];
       addLog("CEREBRAS", JSON.stringify(outPop));
 
+      // P25: Update mock stats counters for cells reasoning
+      stats.inferences += 2;
+      stats.tokensIn += 600;
+      stats.tokensOut += 500;
+      stats.eventsReplayed = timelineEvents.length;
+      stats = stats;
+
       setTimeout(() => {
+        if (!demoMode || stats.currentTime === 0) return;
         cop = {
           summary: "Cascading aftershock triggers multiple utility failures. Greenfield evacuation routes severely compromised. Fire active in Ironworks.",
           overallRisk: "Critical",
@@ -484,6 +682,13 @@
         metrics.activeCells = 0;
         addLog("CEREBRAS", JSON.stringify(cop));
         addLog("ORCH", "Commander synthesized COP successfully in 410ms.");
+
+        // P25: Update mock stats counters for Commander reasoning
+        stats.inferences += 1;
+        stats.tokensIn += 1100;
+        stats.tokensOut += 300;
+        stats.eventsReplayed = timelineEvents.length;
+        stats = stats;
       }, 150);
     }, 350);
   }
@@ -511,6 +716,7 @@
     addLog("ORCH", "ANOMALY: Levee failure. Invoking specialists.");
 
     setTimeout(() => {
+      if (!demoMode || stats.currentTime === 0) return;
       cellStatuses.Intelligence = "done";
       var outIntel = { agent: "Intelligence", summary: "Flood vector modeling indicates Southport water depth of 1.5m, rising 10cm/hr.", riskLevel: "High", confidence: 0.93, stateVersion: state.version, recommendations: ["Issue flood warning for Southport lowest elevations"], evidence: ["Water depth telemetry"] };
       cellHistory.Intelligence = [outIntel, ...cellHistory.Intelligence];
@@ -521,7 +727,15 @@
       cellHistory.Population = [outPop, ...cellHistory.Population];
       addLog("CEREBRAS", JSON.stringify(outPop));
 
+      // P25: Update mock stats counters for cells reasoning
+      stats.inferences += 2;
+      stats.tokensIn += 700;
+      stats.tokensOut += 550;
+      stats.eventsReplayed = timelineEvents.length;
+      stats = stats;
+
       setTimeout(() => {
+        if (!demoMode || stats.currentTime === 0) return;
         cop = {
           summary: "Levee breach in Southport leads to severe flooding. 4,500 citizens stranded. Evacuations in progress.",
           overallRisk: "Critical",
@@ -536,6 +750,13 @@
         metrics.activeCells = 0;
         addLog("CEREBRAS", JSON.stringify(cop));
         addLog("ORCH", "Commander synthesized COP successfully in 430ms.");
+
+        // P25: Update mock stats counters for Commander reasoning
+        stats.inferences += 1;
+        stats.tokensIn += 1250;
+        stats.tokensOut += 320;
+        stats.eventsReplayed = timelineEvents.length;
+        stats = stats;
       }, 150);
     }, 380);
   }
@@ -604,7 +825,19 @@
 
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">
-    <PlaybackControl {state} activeEvent={timelineEvents.length > 0 ? timelineEvents[timelineEvents.length - 1] : null} />
+    <PlaybackControl
+      {state}
+      activeEvent={timelineEvents.length > 0 ? timelineEvents[timelineEvents.length - 1] : null}
+      {stats}
+      {demoMode}
+      {isPlaying}
+      {speed}
+      on:play={handlePlay}
+      on:step={handleStep}
+      on:reset={handleReset}
+      on:load={handleLoad}
+      on:speed={handleSpeed}
+    />
     
     <PerceptionUpload on:uploading={handleUploading} on:events={handlePerceptionEvents} on:error={handlePerceptionError} />
     
