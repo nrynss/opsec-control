@@ -82,17 +82,18 @@ type app struct {
 // eocSimController coordinates the EOC for simulation controls and reset (P24).
 // It implements contracts.SimulationController.
 type eocSimController struct {
-	sim      *simulation.Engine
-	store    *state.Store
-	tl       *timeline.Timeline
-	initial  contracts.WorldState
-	copStore *copStore
-	bcast    api.Broadcaster
-	app      *app
-	bus      contracts.EventBus
+	sim       *simulation.Engine
+	store     *state.Store
+	tl        *timeline.Timeline
+	initial   contracts.WorldState
+	copStore  *copStore
+	bcast     api.Broadcaster
+	app       *app
+	bus       contracts.EventBus
 	parentCtx context.Context
+	llm       *llm.Client
 
-	mu            sync.Mutex
+	mu              sync.Mutex
 	reasoningCancel context.CancelFunc
 	subCancel       func()
 }
@@ -190,9 +191,6 @@ func (c *eocSimController) startLoop() {
 
 // Reset implements the coordinated reset with epoch guard and actions.
 func (c *eocSimController) Reset() {
-	// increment epoch via app
-	atomic.AddInt32(&c.app.epoch, 1)
-
 	if c.reasoningCancel != nil {
 		c.reasoningCancel()
 	}
@@ -205,6 +203,11 @@ func (c *eocSimController) Reset() {
 	c.sim.Reset()
 	c.store.Reset(c.initial)
 	c.tl.Truncate()
+
+	// Clear LLM token/request counters so post-reset /scenario/stats shows a true "All Clear".
+	if c.llm != nil {
+		c.llm.ResetStats()
+	}
 
 	// Append synthetic reset event to timeline (for log)
 	ev := contracts.Event{
@@ -227,7 +230,7 @@ func (c *eocSimController) Reset() {
 		c.bcast.Broadcast(map[string]any{"kind": "reset"})
 	}
 
-	// Restart loop with new epoch
+	// Restart loop with new epoch (the Add inside startLoop establishes the fresh generation).
 	c.startLoop()
 }
 
@@ -351,6 +354,7 @@ func main() {
 		app:       a,
 		bus:       bus,
 		parentCtx: ctx,
+		llm:       llmClient,
 	}
 	api.New(store, bus, tl, cop, llmClient, &providerAdapter{client: llmClient}, wsSrv, ctrl, llmClient).Register(mux)
 	mux.Handle("GET /stream", wsSrv.Handler())
