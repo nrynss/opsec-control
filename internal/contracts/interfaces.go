@@ -137,6 +137,7 @@ type SimulationController interface {
 	WallElapsedMS() int64
 	Status() string
 	CurrentTime() SimTime
+	Speed() float64
 }
 
 // TokenStatsProvider provides aggregated LLM usage counters for stats
