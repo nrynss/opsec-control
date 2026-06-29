@@ -1,6 +1,6 @@
 <!-- e:\opsec-control\web\src\components\Dashboard.svelte -->
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, afterUpdate } from 'svelte';
   import HUD from './HUD.svelte';
   import Map from './Map.svelte';
   import CellPanel from './CellPanel.svelte';
@@ -38,6 +38,7 @@
     prioritizedActions: [],
     cellOutputs: []
   };
+  var copHistory = [];
 
   // Specialist Cell statuses and data
   var cellStatuses = {
@@ -48,16 +49,17 @@
     "Communications": "idle"
   };
 
-  var cellData = {
-    "Intelligence": null,
-    "Infrastructure": null,
-    "Medical": null,
-    "Population": null,
-    "Communications": null
+  var cellHistory = {
+    "Intelligence": [],
+    "Infrastructure": [],
+    "Medical": [],
+    "Population": [],
+    "Communications": []
   };
 
   var timelineEvents = [];
   var matrixLogs = [];
+  var timelineElement;
 
   var currentProvider = "cerebras";
   var switchingProvider = false;
@@ -106,15 +108,26 @@
       prioritizedActions: [],
       cellOutputs: []
     };
+    copHistory = [];
 
     for (var k in cellStatuses) {
       cellStatuses[k] = "idle";
-      cellData[k] = null;
+      cellHistory[k] = [];
     }
     metrics = { activeCells: 0, tokensPerSec: 0, latencyMs: 0, tickTokens: 0 };
     timelineEvents = [];
     matrixLogs = [{ prefix: "SYSTEM", content: "Cerebro command center ready. Listening on /stream." }];
   }
+
+  afterUpdate(() => {
+    if (timelineElement) {
+      var threshold = 30;
+      var isNearBottom = timelineElement.scrollTop + timelineElement.clientHeight >= timelineElement.scrollHeight - threshold;
+      if (isNearBottom || timelineElement.scrollHeight <= timelineElement.clientHeight + 10) {
+        timelineElement.scrollTop = timelineElement.scrollHeight;
+      }
+    }
+  });
 
   onMount(() => {
     loadNominalState();
@@ -247,6 +260,9 @@
 
     if (kind === "cop" || (!kind && payload.overallRisk && payload.prioritizedActions)) {
       cop = payload;
+      if (!copHistory.some(item => item.summary === payload.summary && item.overallRisk === payload.overallRisk)) {
+        copHistory = [payload, ...copHistory];
+      }
       if (payload.metrics) {
         metrics.activeCells = payload.metrics.cellCount || 0;
         metrics.tokensPerSec = payload.metrics.aggregateTokensPerSec || 0;
@@ -264,7 +280,9 @@
       if (payload.cellOutputs) {
         payload.cellOutputs.forEach(out => {
           cellStatuses[out.agent] = "done";
-          cellData[out.agent] = out;
+          if (!cellHistory[out.agent].some(item => item.stateVersion === out.stateVersion && item.summary === out.summary)) {
+            cellHistory[out.agent] = [out, ...cellHistory[out.agent]];
+          }
         });
       }
       return;
@@ -272,12 +290,17 @@
 
     if (kind === "cell_output" || (!kind && payload.agent && payload.recommendations)) {
       cellStatuses[payload.agent] = "done";
-      cellData[payload.agent] = payload;
+      if (!cellHistory[payload.agent].some(item => item.stateVersion === payload.stateVersion && item.summary === payload.summary)) {
+        cellHistory[payload.agent] = [payload, ...cellHistory[payload.agent]];
+      }
       return;
     }
 
     if (kind === "event" || (!kind && payload.id && payload.type)) {
-      timelineEvents = [payload, ...timelineEvents];
+      timelineEvents = [...timelineEvents, payload];
+      if (timelineEvents.length > 500) {
+        timelineEvents = timelineEvents.slice(timelineEvents.length - 500);
+      }
       if (payload.source !== "ambient") {
         var woken = classifyEvent(payload.type);
         for (var k in cellStatuses) {
@@ -294,8 +317,8 @@
   function addLog(prefix, content) {
     var finalPrefix = prefix === "CEREBRAS" ? currentProvider.toUpperCase() : prefix;
     matrixLogs = [...matrixLogs, { prefix: finalPrefix, content }];
-    if (matrixLogs.length > 100) {
-      matrixLogs = matrixLogs.slice(matrixLogs.length - 100);
+    if (matrixLogs.length > 500) {
+      matrixLogs = matrixLogs.slice(matrixLogs.length - 500);
     }
   }
 
@@ -335,7 +358,7 @@
     addLog("SENSOR", "SEISMIC SPIKE DETECTED. MAGNITUDE 6.8.");
     
     var event = { id: "evt-shock", timestamp: 6, source: "seismograph", type: "MainshockOccurred", confidence: 1.0 };
-    timelineEvents = [event, ...timelineEvents];
+    timelineEvents = [...timelineEvents, event];
 
     // Map shock adjustments
     state.version += 1;
@@ -359,27 +382,33 @@
     // Cells finish simultaneously
     setTimeout(() => {
       cellStatuses.Intelligence = "done";
-      cellData.Intelligence = { agent: "Intelligence", summary: "Aftershock forecast: 82% within 24 hours. Dam telemetry shows elevated stress.", riskLevel: "Medium", confidence: 0.9, stateVersion: state.version, recommendations: ["Continuous dam telemetry monitoring"], evidence: ["Substation offline indicators"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Intelligence));
+      var outIntel = { agent: "Intelligence", summary: "Aftershock forecast: 82% within 24 hours. Dam telemetry shows elevated stress.", riskLevel: "Medium", confidence: 0.9, stateVersion: state.version, recommendations: ["Continuous dam telemetry monitoring"], evidence: ["Substation offline indicators"] };
+      cellHistory.Intelligence = [outIntel, ...cellHistory.Intelligence];
+      addLog("CEREBRAS", JSON.stringify(outIntel));
 
       cellStatuses.Infrastructure = "done";
-      cellData.Infrastructure = { agent: "Infrastructure", summary: "Vora and Iron bridges closed due to displacement. Highgate grid offline.", riskLevel: "High", confidence: 0.95, stateVersion: state.version, recommendations: ["Initiate structural scans on Vora Bridge", "Establish detours via South Span"], evidence: ["Bridge sensor displacement indicators"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Infrastructure));
+      var outInfra = { agent: "Infrastructure", summary: "Vora and Iron bridges closed due to displacement. Highgate grid offline.", riskLevel: "High", confidence: 0.95, stateVersion: state.version, recommendations: ["Initiate structural scans on Vora Bridge", "Establish detours via South Span"], evidence: ["Bridge sensor displacement indicators"] };
+      cellHistory.Infrastructure = [outInfra, ...cellHistory.Infrastructure];
+      addLog("CEREBRAS", JSON.stringify(outInfra));
 
       cellStatuses.Medical = "done";
-      cellData.Medical = { agent: "Medical", summary: "Central General hospital on backup generators. Bed occupancy 85%.", riskLevel: "Medium", confidence: 0.88, stateVersion: state.version, recommendations: ["Establish ER overflow zone"], evidence: ["Power grid drops"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Medical));
+      var outMed = { agent: "Medical", summary: "Central General hospital on backup generators. Bed occupancy 85%.", riskLevel: "Medium", confidence: 0.88, stateVersion: state.version, recommendations: ["Establish ER overflow zone"], evidence: ["Power grid drops"] };
+      cellHistory.Medical = [outMed, ...cellHistory.Medical];
+      addLog("CEREBRAS", JSON.stringify(outMed));
 
       cellStatuses.Population = "done";
-      cellData.Population = { agent: "Population", summary: "No casualties reported. Minor evacuation traffic on highway.", riskLevel: "Low", confidence: 0.92, stateVersion: state.version, recommendations: ["Monitor evacuation flows"], evidence: ["Highway traffic cams"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Population));
+      var outPop = { agent: "Population", summary: "No casualties reported. Minor evacuation traffic on highway.", riskLevel: "Low", confidence: 0.92, stateVersion: state.version, recommendations: ["Monitor evacuation flows"], evidence: ["Highway traffic cams"] };
+      cellHistory.Population = [outPop, ...cellHistory.Population];
+      addLog("CEREBRAS", JSON.stringify(outPop));
 
       cellStatuses.Communications = "done";
-      cellData.Communications = { agent: "Communications", summary: "Highgate cell towers disabled. Mesh network mode active.", riskLevel: "Medium", confidence: 0.91, stateVersion: state.version, recommendations: ["Broadcasting localized alerts via backup channel"], evidence: ["Cell tower telemetry dropouts"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Communications));
+      var outComm = { agent: "Communications", summary: "Highgate cell towers disabled. Mesh network mode active.", riskLevel: "Medium", confidence: 0.91, stateVersion: state.version, recommendations: ["Broadcasting localized alerts via backup channel"], evidence: ["Cell tower telemetry dropouts"] };
+      cellHistory.Communications = [outComm, ...cellHistory.Communications];
+      addLog("CEREBRAS", JSON.stringify(outComm));
 
       // Commander synthesizes COP
       setTimeout(() => {
+        var latestOutputs = [outIntel, outInfra, outMed, outPop, outComm];
         cop = {
           summary: "Cerebro earthquake cascade. Two bridges closed, Highgate heavily damaged, Central General hospital at critical capacity.",
           overallRisk: "High",
@@ -388,8 +417,9 @@
             { priority: 2, action: "Deploy backup generator fuel to Central General", owner: "Medical" },
             { priority: 3, action: "Enable localized emergency broadcasts in Highgate", owner: "Communications" }
           ],
-          cellOutputs: Object.values(cellData)
+          cellOutputs: latestOutputs
         };
+        copHistory = [cop, ...copHistory];
         metrics.activeCells = 0;
         addLog("CEREBRAS", JSON.stringify(cop));
         addLog("ORCH", "Commander synthesized COP successfully in 520ms.");
@@ -403,7 +433,7 @@
 
     var event = { id: "evt-after", timestamp: 18, source: "seismograph", type: "AftershockOccurred", confidence: 1.0 };
     var eventFire = { id: "evt-fire", timestamp: 18, source: "citizen", type: "FireIgnited", confidence: 0.9 };
-    timelineEvents = [eventFire, event, ...timelineEvents];
+    timelineEvents = [...timelineEvents, event, eventFire];
 
     state.version += 1;
     state.bridges["south-span"].status = "closed"; // South Span closed
@@ -422,12 +452,14 @@
 
     setTimeout(() => {
       cellStatuses.Infrastructure = "done";
-      cellData.Infrastructure = { agent: "Infrastructure", summary: "South Span restricted. Greenfield evacuation lanes compromised.", riskLevel: "Critical", confidence: 0.94, stateVersion: state.version, recommendations: ["Prioritize South Span structural inspection"], evidence: ["Bridge load sensors spike"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Infrastructure));
+      var outInfra = { agent: "Infrastructure", summary: "South Span restricted. Greenfield evacuation lanes compromised.", riskLevel: "Critical", confidence: 0.94, stateVersion: state.version, recommendations: ["Prioritize South Span structural inspection"], evidence: ["Bridge load sensors spike"] };
+      cellHistory.Infrastructure = [outInfra, ...cellHistory.Infrastructure];
+      addLog("CEREBRAS", JSON.stringify(outInfra));
 
       cellStatuses.Population = "done";
-      cellData.Population = { agent: "Population", summary: "Evacuation route blocked. Greenfield shelter at 90% capacity.", riskLevel: "High", confidence: 0.96, stateVersion: state.version, recommendations: ["Redirect traffic to Greenfield secondary gymnasium"], evidence: ["Traffic queue at South Span"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Population));
+      var outPop = { agent: "Population", summary: "Evacuation route blocked. Greenfield shelter at 90% capacity.", riskLevel: "High", confidence: 0.96, stateVersion: state.version, recommendations: ["Redirect traffic to Greenfield secondary gymnasium"], evidence: ["Traffic queue at South Span"] };
+      cellHistory.Population = [outPop, ...cellHistory.Population];
+      addLog("CEREBRAS", JSON.stringify(outPop));
 
       setTimeout(() => {
         cop = {
@@ -438,8 +470,9 @@
             { priority: 2, action: "Deploy firefighting units to Ironworks sector", owner: "Infrastructure" },
             { priority: 3, action: "Inspect South Span bridge foundation", owner: "Infrastructure" }
           ],
-          cellOutputs: Object.values(cellData)
+          cellOutputs: [outInfra, outPop]
         };
+        copHistory = [cop, ...copHistory];
         metrics.activeCells = 0;
         addLog("CEREBRAS", JSON.stringify(cop));
         addLog("ORCH", "Commander synthesized COP successfully in 410ms.");
@@ -451,7 +484,7 @@
     addLog("SENSOR", "LEVEE BREACH IN SOUTHPORT. FLOOD VECTOR ACTIVE.");
 
     var event = { id: "evt-breach", timestamp: 34, source: "drone-feed", type: "LeveeBreached", confidence: 0.98 };
-    timelineEvents = [event, ...timelineEvents];
+    timelineEvents = [...timelineEvents, event];
 
     state.version += 1;
     state.levee.status = "breached";
@@ -471,12 +504,14 @@
 
     setTimeout(() => {
       cellStatuses.Intelligence = "done";
-      cellData.Intelligence = { agent: "Intelligence", summary: "Flood vector modeling indicates Southport water depth of 1.5m, rising 10cm/hr.", riskLevel: "High", confidence: 0.93, stateVersion: state.version, recommendations: ["Issue flood warning for Southport lowest elevations"], evidence: ["Water depth telemetry"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Intelligence));
+      var outIntel = { agent: "Intelligence", summary: "Flood vector modeling indicates Southport water depth of 1.5m, rising 10cm/hr.", riskLevel: "High", confidence: 0.93, stateVersion: state.version, recommendations: ["Issue flood warning for Southport lowest elevations"], evidence: ["Water depth telemetry"] };
+      cellHistory.Intelligence = [outIntel, ...cellHistory.Intelligence];
+      addLog("CEREBRAS", JSON.stringify(outIntel));
 
       cellStatuses.Population = "done";
-      cellData.Population = { agent: "Population", summary: "Evacuation of Southport sector required. 4,500 citizens stranded.", riskLevel: "Critical", confidence: 0.97, stateVersion: state.version, recommendations: ["Deploy rescue boats to Southport sector"], evidence: ["Drone frames showing water levels"] };
-      addLog("CEREBRAS", JSON.stringify(cellData.Population));
+      var outPop = { agent: "Population", summary: "Evacuation of Southport sector required. 4,500 citizens stranded.", riskLevel: "Critical", confidence: 0.97, stateVersion: state.version, recommendations: ["Deploy rescue boats to Southport sector"], evidence: ["Drone frames showing water levels"] };
+      cellHistory.Population = [outPop, ...cellHistory.Population];
+      addLog("CEREBRAS", JSON.stringify(outPop));
 
       setTimeout(() => {
         cop = {
@@ -487,8 +522,9 @@
             { priority: 2, action: "Construct sandbag barriers along secondary canal", owner: "Infrastructure" },
             { priority: 3, action: "Set up triage and dry evacuation zone at Greenfield", owner: "Medical" }
           ],
-          cellOutputs: Object.values(cellData)
+          cellOutputs: [outIntel, outPop]
         };
+        copHistory = [cop, ...copHistory];
         metrics.activeCells = 0;
         addLog("CEREBRAS", JSON.stringify(cop));
         addLog("ORCH", "Commander synthesized COP successfully in 430ms.");
@@ -567,7 +603,7 @@
     <!-- Timeline Event log -->
     <div class="control-panel" style="flex: 1; display: flex; flex-direction: column;">
       <div class="panel-title">System Event log</div>
-      <div class="timeline-list">
+      <div class="timeline-list" bind:this={timelineElement}>
         {#each timelineEvents as ev}
           <div class="timeline-item" class:rejected={ev.type === 'event_rejected'}>
             <div class="timeline-item-meta">
@@ -586,12 +622,12 @@
   <!-- Center Main Area: Tactical Map and Specialists grid -->
   <div class="main-area">
     <!-- SV Map -->
-    <Map {state} activeEvent={timelineEvents[0]} />
+    <Map {state} activeEvent={timelineEvents[timelineEvents.length - 1]} />
 
     <!-- Specialists Grid -->
     <div class="specialists-panel">
       {#each Object.keys(cellStatuses) as name}
-        <CellPanel kind={name} data={cellData[name]} status={cellStatuses[name]} />
+        <CellPanel kind={name} history={cellHistory[name]} status={cellStatuses[name]} />
       {/each}
     </div>
   </div>
@@ -607,21 +643,35 @@
         {/if}
       </div>
       
-      <div class="cop-summary">
-        {cop.summary}
-      </div>
-
-      <div style="font-size: 0.8rem; font-weight: 700; color: #a78bfa; margin-top: 6px; border-top: 1px solid rgba(139, 92, 246, 0.15); padding-top: 6px;">Prioritized Actions</div>
-      <div class="cop-actions">
-        {#if cop.prioritizedActions.length === 0}
-          <div style="font-size: 0.75rem; color: var(--text-muted); font-style: italic;">No emergency recommendations generated.</div>
-        {:else}
-          {#each cop.prioritizedActions as action}
-            <div class="cop-action-item">
-              <span style="font-weight: 700; color: #d8b4fe;">#{action.priority}</span>
-              <span style="color: var(--text-primary);">{action.action}</span>
+      <div class="cop-history-list">
+        {#each copHistory as item, idx}
+          <div class="cop-history-item">
+            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 700; color: #a78bfa;">
+              <span>#{copHistory.length - idx} COP</span>
+              {#if item.overallRisk && item.overallRisk !== 'Low'}
+                <span style="color: var(--color-critical); font-weight: 700;">{item.overallRisk}</span>
+              {/if}
             </div>
-          {/each}
+            <div class="cop-summary" style="margin-top: 4px;">
+              {item.summary}
+            </div>
+            {#if item.prioritizedActions && item.prioritizedActions.length > 0}
+              <div style="font-size: 0.75rem; font-weight: 700; color: #a78bfa; margin-top: 4px; border-top: 1px solid rgba(139, 92, 246, 0.1); padding-top: 4px;">Prioritized Actions</div>
+              <div class="cop-actions" style="margin-top: 4px;">
+                {#each item.prioritizedActions as action}
+                  <div class="cop-action-item">
+                    <span style="font-weight: 700; color: #d8b4fe;">#{action.priority}</span>
+                    <span style="color: var(--text-primary);">{action.action}</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/each}
+        {#if copHistory.length === 0}
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px;">
+            EOC system nominal. Standing by for telemetry.
+          </div>
         {/if}
       </div>
     </div>

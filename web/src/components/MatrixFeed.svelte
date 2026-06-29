@@ -9,7 +9,11 @@
 
   afterUpdate(() => {
     if (feedElement) {
-      feedElement.scrollTop = feedElement.scrollHeight;
+      var threshold = 30;
+      var isNearBottom = feedElement.scrollTop + feedElement.clientHeight >= feedElement.scrollHeight - threshold;
+      if (isNearBottom || feedElement.scrollHeight <= feedElement.clientHeight + 10) {
+        feedElement.scrollTop = feedElement.scrollHeight;
+      }
     }
   });
 
