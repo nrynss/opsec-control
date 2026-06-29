@@ -2,11 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
 	"github.com/nrynss/opsec-control/internal/timeline"
 )
+
+// maxImageSize is the hard limit for perception image uploads (raw body or
+// multipart file). 10 MiB as used in handlePostPerception.
+const maxImageSize = 10 << 20
 
 // COPProvider allows the API to serve the current CommonOperationalPicture
 // without owning state. Typically provided by cmd/eoc which retains the last
@@ -42,19 +48,21 @@ func toFlatEvents(entries []timeline.Entry) []contracts.Event {
 // reasoning loop in cmd/eoc, and the API only serves the latest COP via
 // COPProvider. Keeping the orchestrator out of the edge enforces "no logic" here.
 type Server struct {
-	store contracts.StateStore
-	bus   contracts.EventBus
-	log   EventLog
-	cop   COPProvider
+	store      contracts.StateStore
+	bus        contracts.EventBus
+	log        EventLog
+	cop        COPProvider
+	perception contracts.Perception
 }
 
 // New creates the API server.
-func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop COPProvider) *Server {
+func New(store contracts.StateStore, bus contracts.EventBus, log EventLog, cop COPProvider, perception contracts.Perception) *Server {
 	return &Server{
-		store: store,
-		bus:   bus,
-		log:   log,
-		cop:   cop,
+		store:      store,
+		bus:        bus,
+		log:        log,
+		cop:        cop,
+		perception: perception,
 	}
 }
 
@@ -65,6 +73,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /timeline", s.handleTimeline)
 	mux.HandleFunc("GET /events", s.handleGetEvents)
 	mux.HandleFunc("POST /events", s.handlePostEvent)
+	mux.HandleFunc("POST /perception", s.handlePostPerception)
 	mux.HandleFunc("POST /scenario/load", s.handleScenarioLoad)
 	mux.HandleFunc("POST /scenario/reset", s.handleScenarioReset)
 }
@@ -127,4 +136,99 @@ func (s *Server) handleScenarioLoad(w http.ResponseWriter, r *http.Request) {
 // handleScenarioReset placeholder.
 func (s *Server) handleScenarioReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// handlePostPerception accepts a satellite/drone image via raw request body
+// (application/octet-stream or image/*) or multipart/form-data (field "image"
+// or "file"), with source via ?source= or form field ("drone" | "satellite").
+// It delegates to the injected Perception (per P5), stamps a current sim
+// timestamp (so events pass the §14.2 temporal gate), and publishes the
+// resulting events onto the bus (triggering anomaly → orchestrator fan-out).
+func (s *Server) handlePostPerception(w http.ResponseWriter, r *http.Request) {
+	if s.perception == nil {
+		http.Error(w, "perception not wired", http.StatusServiceUnavailable)
+		return
+	}
+
+	ct := r.Header.Get("Content-Type")
+	source := r.URL.Query().Get("source")
+
+	var data []byte
+	var readErr error
+
+	if strings.HasPrefix(ct, "multipart/") {
+		if perr := r.ParseMultipartForm(maxImageSize); perr != nil {
+			http.Error(w, "bad multipart form: "+perr.Error(), http.StatusBadRequest)
+			return
+		}
+		if source == "" {
+			source = r.FormValue("source")
+		}
+		file, _, ferr := r.FormFile("image")
+		if ferr != nil {
+			file, _, ferr = r.FormFile("file")
+		}
+		if ferr != nil {
+			http.Error(w, "missing image file (use form field 'image' or 'file')", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		data, readErr = io.ReadAll(file)
+		if readErr == nil && len(data) > maxImageSize {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+	} else {
+		// raw bytes body
+		// Read one byte past the limit so we can distinguish truncation.
+		// Per review observation: avoid silent truncation; return 413 instead.
+		lr := io.LimitReader(r.Body, maxImageSize+1)
+		data, readErr = io.ReadAll(lr)
+		if readErr == nil && len(data) > maxImageSize {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+	}
+
+	if readErr != nil {
+		http.Error(w, "read image data: "+readErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(data) == 0 {
+		http.Error(w, "empty image data", http.StatusBadRequest)
+		return
+	}
+
+	if source == "" {
+		source = "drone"
+	}
+	if source != "drone" && source != "satellite" {
+		http.Error(w, `source must be "drone" or "satellite"`, http.StatusBadRequest)
+		return
+	}
+
+	input := contracts.ImageInput{
+		Source: source,
+		Data:   data,
+	}
+
+	events, perr := s.perception.Interpret(r.Context(), input)
+	if perr != nil {
+		http.Error(w, "perception failed: "+perr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Stamp timestamp from current snapshot so Apply will accept it (perception
+	// impls conventionally use 0 as "fill me in"). Use >= current time.
+	snap := s.store.Snapshot()
+	for i := range events {
+		if events[i].Timestamp == 0 {
+			events[i].Timestamp = snap.Time
+		}
+		s.bus.Publish(events[i])
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{"accepted": len(events)})
 }
