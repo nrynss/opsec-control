@@ -199,8 +199,8 @@ To claim: change the cell to 🔵 with your builder name + date in the same comm
 | **P10** | ⬜ **Unclaimed** | `internal/api` | Add global provider switch API: GET/POST /provider to read/set current provider (cerebras/openrouter). Wire through to llm client. Broadcast change over WS. | P9 |
 | **P11** | ⬜ **Unclaimed** | `cmd/eoc` | Support multiple LLM clients (or switchable one) for global provider. Update main wiring, app state, broadcast. Initial provider from env or default. | P6, P9, P10 |
 | **P12** | ⬜ **Unclaimed** | `web/` | Add global provider dropdown (e.g. HUD or controls). Call /provider on change. Update all "CEREBRAS"/logs to reflect current provider. | P10, P11 |
-| **P13** | ⬜ **Unclaimed** | `web/` | UI layout fixes: Make map smaller (too big currently). Enlarge data point areas (HUD metrics, panels, timeline, matrix, commander). | P12 |
-| **P14** | ⬜ **Unclaimed** | `web/` | Make timeline, matrix feed, logs hold full history + proper scrolling (instead of refresh/overwrite). | P13 |
+| **P13** | ⬜ **Unclaimed** — **scoped in [`TASK-ui-scrollback.md`](TASK-ui-scrollback.md)** | `web/` | UI layout fixes: Make map smaller (too big currently). Enlarge data point areas (HUD metrics, panels, timeline, matrix, commander). | — (independent of P9–P12; see task doc) |
+| **P14** | ⬜ **Unclaimed** — **scoped in [`TASK-ui-scrollback.md`](TASK-ui-scrollback.md)** | `web/` | Make timeline, matrix feed, logs hold full history + proper scrolling (instead of refresh/overwrite). **Decision: everything accumulates** — feeds + Commander COP + specialist Cell outputs all become scrolling histories. | — (independent of P9–P12; see task doc) |
 | **P15** | ⬜ **Unclaimed** | `web/` | Additional UI polish: improve controls, badges, perception panel, live vs demo clarity, general layout/responsiveness. | P14 |
 | **P16** | ⬜ **Unclaimed** | deploy/build + docs | Document OPENROUTER_* in .env.example + hosting.md. Update any deploy notes for dual providers. Validate both providers work for text + vision. | P8, P9 |
 
@@ -212,6 +212,12 @@ frontend is hard-coded **same-origin** (WS `wss://<page-host>/stream`, relative
 offline demo mode and would need CORS the API doesn't have. Single-origin removes
 CORS, removes the Cloudflare-Pages target, and matches the code unchanged.
 
+### Landed (2026-06-29): Westbank → Westside display rename
+Sector/clinic/road **display names** renamed `Westbank` → `Westside` across `web/`,
+`cmd/eoc/scenario.json`, `internal/llm` (mock strings), and `internal/scenariogen`.
+**IDs intentionally unchanged** (`S-WESTBANK`, `H-WESTBANK`, `R-WEST-1`, lowercase
+`westbank` key) — renaming identifiers buys nothing and risks breaking refs.
+
 ### Suggested sequence (parcels are lane-isolated → run independently)
 1. **P1** (contracts) — unblocks everything; lands as the single coordinated commit.
 2. **P2 / P3 / P4 / P5** in parallel (distinct lanes, all depend only on P1).
@@ -219,7 +225,9 @@ CORS, removes the Cloudflare-Pages target, and matches the code unchanged.
 4. **P7** once P1 shapes exist + `api` is running; **P8** once P6's serving behavior + a `web` build exist.
 5. **P9** (llm OpenRouter support) + **P10** (api switch) + **P11** (cmd wiring) can run in parallel (backend lanes).
 6. **P12** (UI dropdown) after backend switch surface.
-7. **P13–P15** (UI layout fixes, scrolling, polish) – UI lane work, can overlap with backend once switch is there.
+7. **P13–P14** (map sizing + scrolling histories) — **independent of P9–P12**;
+   scoped in [`TASK-ui-scrollback.md`](TASK-ui-scrollback.md), can start now. **P15**
+   (further polish) overlaps with the provider dropdown (P12).
 8. **P16** (docs/deploy) last.
 
 **Independence guarantee:** each parcel owns a disjoint set of files —
