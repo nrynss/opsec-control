@@ -62,7 +62,20 @@ type CellOutput struct {
 	Metrics         CellMetrics  `json:"metrics"`
 }
 
+// CellOutputPure is a version of CellOutput without the Metrics field.
+// Used during the critique pass to avoid sending telemetry back to the LLM.
+type CellOutputPure struct {
+	Cell            CellKind     `json:"agent"`
+	Summary         string       `json:"summary"`
+	RiskLevel       RiskLevel    `json:"riskLevel"`
+	Confidence      float64      `json:"confidence"`
+	StateVersion    StateVersion `json:"stateVersion"`
+	Recommendations []string     `json:"recommendations"`
+	Evidence        []string     `json:"evidence"`
+}
+
 // COPMetrics aggregates the throughput telemetry across a whole fan-out, shown on
+
 // the HUD (SPEC §15.1). FanOutLatencyMS is the orchestrator's wall-clock for the
 // entire fan-out (specialists + Commander); the token totals and peak rate are
 // summed/maxed across all cell calls. AggregateTokensPerSec is total output tokens
