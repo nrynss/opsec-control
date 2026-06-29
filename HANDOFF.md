@@ -204,6 +204,7 @@ To claim: change the cell to 🔵 with your builder name + date in the same comm
 | **P15** | ✅ **Done** — Antigravity Builder (2026-06-29) | `web/` | Additional UI polish: improve controls, badges, perception panel, live vs demo clarity, general layout/responsiveness. | P14 |
 | **P16** | ✅ **Done — Claude Builder (2026-06-29)** | deploy/build + docs | Docs ✅ (OPENROUTER_* in .env.example; hosting.md §4.1). **Live validation: 2×2 matrix all-green** (Cerebras + OpenRouter, text + vision) after the **P17** `internal/llm` fixes landed. | P8, P9, **P17** |
 | **P17** | ✅ **Done — Claude Builder (2026-06-29)** | `internal/llm` | Fix dual-provider bugs found by P16 validation (see findings below): object-wrapped perception schema, `extractJSON` fence/prose stripping, `response_format` sent for OpenRouter too, vision event-type aliases. All providers green for text + vision. | P9 |
+| **P18** | ✅ **Done — Claude Builder (2026-06-29)** | `web/` + `cmd/eoc` + `internal/api` | Preset "scenario" buttons now **inject real events** (POST `/events`) instead of mock-only filename strings (which 400'd the real vision API). Apply-time timestamp stamping in `cmd/eoc` `handle()` keeps injected events monotonic-valid; `/events` no longer stamps. (See "P18" section below.) | P16/P17 |
 
 ### P16 validation findings + P17 fixes (2026-06-29, live keys)
 Ran `cmd/eoc` against real Cerebras + OpenRouter keys (scenario replay = text;
@@ -237,6 +238,55 @@ prose**; Cerebras returns clean JSON.
    FireIgnited, `flood`/`flooding`→FloodExtentUpdated, `bridgeblockage`→BridgeCollapsed.
 
 Tracked as **P17** (✅ Done). `go test ./...` + `contracttest` green; gofmt/vet clean.
+
+### P18 — preset triggers inject real events (2026-06-29)
+**Root cause found during deploy smoke-testing:** the perception-panel preset
+buttons ("Vora Bridge Collapse", etc.) POSTed a **filename string** to
+`/perception`. That only worked in **mock mode** (`interpretMock` substring-matches
+the string); with real keys it hit the vision API with undecodable bytes → 400
+`invalid_image`. (Reminder: **image perception is an *optional* ingest — the
+simulation datastream drives the demo**, SPEC §14. Presets are a manual nudge, not
+a required trigger.)
+
+**Fix — presets now publish real events onto the bus:**
+- **`web/` ([`PerceptionUpload.svelte`](web/src/components/PerceptionUpload.svelte))** —
+  `triggerPreset` POSTs a real `contracts.Event` to `/events` (timestamp omitted):
+  `Aftershock M5.5` (`AftershockOccurred`, wakes all 5), `Vora Bridge Collapse`
+  (`BridgeCollapsed{B-VORA}`), `Highgate Building Collapse`
+  (`BuildingCollapsed{S-HIGHGATE}`). **Avoid `LeveeBreached`** — the scenario
+  already breaches the levee, so a repeat is an illegal transition.
+- **`cmd/eoc` ([`main.go`](cmd/eoc/main.go) `handle`)** — events arriving with
+  `Timestamp == 0` are stamped to the **current world time at apply time**, so they
+  satisfy Apply's temporal-monotonicity rule (`ev.Timestamp < ws.Time` → reject,
+  [`state/store.go`](internal/state/store.go)) no matter how far the replay has
+  drained. Handler-side stamping was racy against the bus queue and got rejected.
+- **`internal/api` ([`api.go`](internal/api/api.go) `/events`)** — dropped the racy
+  handler-side stamping; the loop owns it.
+
+**Verified live** (real keys): each preset fires a real fan-out (woke cells + new
+COP) from the post-replay end-state. Note: most *entity*-state events (levee, an
+already-closed bridge) won't re-fire from the damaged end-state; **seismic events
+always do** — they're the most robust manual triggers.
+
+**Also reverted (not committed):** a perception image-transcode experiment +
+`golang.org/x/image` dep — it solved a non-issue (the error was the preset strings,
+not real uploads) and regressed JPEG. Perception is back to the P17 state: raw
+passthrough, **PNG/JPEG** uploads work; GIF/WEBP are not converted.
+
+### Provider switching from the UI (P12, confirmed working)
+The HUD **LLM Provider** dropdown ([`HUD.svelte`](web/src/components/HUD.svelte))
+flips **Cerebras ↔ OpenRouter** live: `change → POST /provider → llm.SetProvider →
+broadcast over /stream`. It switches the **provider/backend**, each pinned to its
+env model (`CEREBRAS_MODEL=gemma-4-31b`, `OPENROUTER_MODEL=google/gemma-4-31b-it`) —
+there is **no per-model picker**. To demo a different model (e.g.
+`deepseek/deepseek-v4-flash`), set `OPENROUTER_MODEL` at deploy. The switch applies
+to the **next** fan-out; OpenRouter is ~15s/fan-out vs Cerebras ~1-2s.
+
+### Deploy smoke-test status (2026-06-29, local Docker)
+`docker build` + `docker run -e PORT=9090 --env-file .env` (with `-e WEB_DIR=/web/dist`)
+serves the dashboard **live** (real metrics, scenario replay, COPs) and the
+`/provider` switch works in-container. This is the same image Fly will build — the
+remaining deploy steps are mechanical (see [`hosting.md`](hosting.md) §4).
 
 ### Deploy decision (2026-06-29): single-origin on Fly.io (Cloud Run later)
 Per [`hosting.md`](hosting.md): **one Go container serves both the static
