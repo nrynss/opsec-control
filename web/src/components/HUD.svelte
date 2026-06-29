@@ -6,6 +6,7 @@
   export var metrics = {};
   export var demoMode = true;
   export var currentProvider = "cerebras";
+  export var switchingProvider = false;
 
   const dispatch = createEventDispatcher();
 
@@ -91,6 +92,7 @@
         id="provider-select" 
         class="provider-select" 
         value={currentProvider} 
+        disabled={switchingProvider}
         on:change={handleProviderChange}
       >
         <option value="cerebras">Cerebras</option>
@@ -130,9 +132,15 @@
     background-size: 16px;
   }
 
-  .provider-select:hover, .provider-select:focus {
+  .provider-select:hover:not(:disabled), .provider-select:focus:not(:disabled) {
     border-color: rgba(0, 242, 254, 0.5);
     box-shadow: 0 0 8px rgba(0, 242, 254, 0.2);
+  }
+
+  .provider-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    border-color: rgba(255, 255, 255, 0.08);
   }
 
   .provider-select option {

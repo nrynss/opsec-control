@@ -60,6 +60,7 @@
   var matrixLogs = [];
 
   var currentProvider = "cerebras";
+  var switchingProvider = false;
   var demoMode = true; // Default to demo mode if WS fails or offline
   var ws = null;
   var demoTimer = null;
@@ -158,6 +159,9 @@
 
   async function changeProvider(e) {
     var newProvider = e.detail;
+    var previousProvider = currentProvider;
+    currentProvider = newProvider; // Optimistic update
+    switchingProvider = true;
     try {
       var res = await fetch("/provider", {
         method: "POST",
@@ -165,11 +169,15 @@
         body: JSON.stringify({ provider: newProvider })
       });
       if (res.ok) {
-        currentProvider = newProvider;
         addLog("SYSTEM", `Active provider set to: ${newProvider.toUpperCase()}`);
+      } else {
+        throw new Error(await res.text() || "unknown error");
       }
     } catch (err) {
+      currentProvider = previousProvider; // Revert on failure
       addLog("SYSTEM_ERR", `Failed to switch provider: ${err.message}`);
+    } finally {
+      switchingProvider = false;
     }
   }
 
@@ -548,7 +556,7 @@
 
 <div class="dashboard-container">
   <!-- Top HUD panel -->
-  <HUD {state} {metrics} {demoMode} {currentProvider} on:changeProvider={changeProvider} />
+  <HUD {state} {metrics} {demoMode} {currentProvider} {switchingProvider} on:changeProvider={changeProvider} />
 
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">
