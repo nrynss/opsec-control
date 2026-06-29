@@ -97,6 +97,9 @@ func (c *Client) interpretMock(ctx context.Context, input contracts.ImageInput) 
 		}
 	}
 
+	// Record stats: mock perception ~500 tokens in (image placeholder) + ~200 out per event.
+	c.recordStats(500, 200*len(events))
+
 	return events, nil
 }
 
@@ -280,6 +283,9 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 			Payload:    re.Payload,
 		})
 	}
+
+	// Record stats from API usage (P21).
+	c.recordStats(apiResp.Usage.PromptTokens, apiResp.Usage.CompletionTokens)
 
 	return events, nil
 }

@@ -32,6 +32,12 @@ type Engine struct {
 	resetCh  chan struct{} // closed to interrupt sleepers in Run() on Reset/Load
 	speed    float64       // 1.0 = real-time. <=0 means as fast as possible.
 	seed     int64
+
+	// Wall-clock tracking for display stats only (P19/P20).
+	// Strictly isolated from logical simulation time, event ordering,
+	// state, COP, etc. (determinism firewall per HANDOFF).
+	wallStart   time.Time
+	wallElapsed time.Duration
 }
 
 // New creates a new Engine that will publish events to the given bus.
@@ -61,6 +67,8 @@ func (e *Engine) Load(sc *contracts.Scenario) error {
 	e.current = 0
 	e.paused = false
 	e.resumeCh = nil
+	e.wallStart = time.Time{}
+	e.wallElapsed = 0
 
 	// Interrupt any waiter in a concurrent Run() and allocate a fresh notification channel.
 	e.interruptResetLocked()
@@ -80,6 +88,20 @@ func (e *Engine) interruptResetLocked() {
 	}
 }
 
+// wall helpers (called under lock) - display only, no effect on logic.
+func (e *Engine) updateWallLocked() {
+	if !e.wallStart.IsZero() {
+		e.wallElapsed += time.Since(e.wallStart)
+		e.wallStart = time.Time{}
+	}
+}
+
+func (e *Engine) startWallLocked() {
+	if e.wallStart.IsZero() && !e.paused && e.scenario != nil && e.idx < len(e.scenario.Events) {
+		e.wallStart = time.Now()
+	}
+}
+
 // Reset returns playback to the start of the current scenario (time 0, first event).
 // If no scenario is loaded, this is a no-op.
 func (e *Engine) Reset() {
@@ -92,6 +114,8 @@ func (e *Engine) Reset() {
 	e.current = 0
 	e.paused = false
 	e.resumeCh = nil
+	e.wallStart = time.Time{}
+	e.wallElapsed = 0
 
 	// Wake any sleeper in Run() so it re-evaluates the new state.
 	e.interruptResetLocked()
@@ -105,6 +129,13 @@ func (e *Engine) CurrentTime() contracts.SimTime {
 	return e.current
 }
 
+// Speed returns current playback speed.
+func (e *Engine) Speed() float64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.speed
+}
+
 // Step publishes at most the next event from the scenario and advances logical time.
 // Returns (true, nil) if an event was published, (false, nil) if at end or no scenario.
 func (e *Engine) Step() (bool, error) {
@@ -116,6 +147,7 @@ func (e *Engine) Step() (bool, error) {
 	ev := e.scenario.Events[e.idx]
 	e.current = ev.Timestamp
 	e.idx++
+	e.startWallLocked()
 	e.mu.Unlock()
 
 	e.bus.Publish(ev)
@@ -139,6 +171,7 @@ func (e *Engine) Pause() {
 	defer e.mu.Unlock()
 	if !e.paused {
 		e.paused = true
+		e.updateWallLocked()
 		e.resumeCh = make(chan struct{})
 	}
 }
@@ -149,6 +182,7 @@ func (e *Engine) Resume() {
 	defer e.mu.Unlock()
 	if e.paused {
 		e.paused = false
+		e.startWallLocked()
 		if e.resumeCh != nil {
 			close(e.resumeCh)
 			e.resumeCh = nil
@@ -183,8 +217,16 @@ func (e *Engine) getResetCh() <-chan struct{} {
 func (e *Engine) Run(ctx context.Context) error {
 	for {
 		if ctx.Err() != nil {
+			e.mu.Lock()
+			e.updateWallLocked()
+			e.mu.Unlock()
 			return ctx.Err()
 		}
+
+		// Start wall if we are active (for initial Run)
+		e.mu.Lock()
+		e.startWallLocked()
+		e.mu.Unlock()
 
 		// Check for pause.
 		e.mu.Lock()
@@ -193,6 +235,9 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.mu.Unlock()
 
 		if paused {
+			e.mu.Lock()
+			e.updateWallLocked()
+			e.mu.Unlock()
 			resetCh := e.getResetCh()
 			select {
 			case <-resCh:
@@ -207,6 +252,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		// Not paused. Capture current next event + the resetCh generation we will wait on.
 		e.mu.Lock()
 		if e.scenario == nil || e.idx >= len(e.scenario.Events) {
+			e.updateWallLocked()
 			e.mu.Unlock()
 			return nil
 		}
@@ -215,6 +261,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		delta := float64(nextEv.Timestamp - e.current)
 		sp := e.speed
 		resetCh := e.resetCh // snapshot the specific channel for this wait
+		e.startWallLocked()
 		e.mu.Unlock()
 
 		waitedForTime := true
@@ -251,5 +298,55 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.mu.Unlock()
 
 		e.bus.Publish(ev)
+	}
+}
+
+// WallElapsed returns accumulated wall time for display stats (P20).
+// Display only; must not affect determinism.
+func (e *Engine) WallElapsed() time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.wallStart.IsZero() {
+		return e.wallElapsed
+	}
+	return e.wallElapsed + time.Since(e.wallStart)
+}
+
+// WallElapsedMS for the stats DTO (avoids time.Duration in contracts).
+func (e *Engine) WallElapsedMS() int64 {
+	return e.WallElapsed().Milliseconds()
+}
+
+// Status returns current simulation state for stats (P20).
+func (e *Engine) Status() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.scenario == nil {
+		return "idle"
+	}
+	if e.idx >= len(e.scenario.Events) {
+		return "complete"
+	}
+	if e.paused {
+		return "paused"
+	}
+	return "running"
+}
+
+// Info returns scenario bounds for the UI clock (P20).
+func (e *Engine) Info() contracts.SimulationInfo {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.scenario == nil {
+		return contracts.SimulationInfo{}
+	}
+	end := contracts.SimTime(0)
+	if len(e.scenario.Events) > 0 {
+		end = e.scenario.Events[len(e.scenario.Events)-1].Timestamp
+	}
+	return contracts.SimulationInfo{
+		Name:      e.scenario.Name,
+		StartTime: 0,
+		EndTime:   end,
 	}
 }

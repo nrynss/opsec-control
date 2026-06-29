@@ -217,7 +217,7 @@ body {
 /* Playback Control Buttons */
 .playback-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
@@ -905,4 +905,135 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* P25 Additions: All Clear Button, Progress Bar & Telemetry Grid */
+
+.all-clear-btn {
+  background: rgba(0, 255, 135, 0.08);
+  border: 1px solid rgba(0, 255, 135, 0.3);
+  border-radius: 4px;
+  color: var(--color-nominal);
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  box-shadow: 0 0 10px rgba(0, 255, 135, 0.05);
+}
+
+.all-clear-btn:hover:not(:disabled) {
+  background: rgba(0, 255, 135, 0.16);
+  border-color: var(--color-nominal);
+  box-shadow: 0 0 15px rgba(0, 255, 135, 0.3);
+}
+
+.all-clear-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.progress-current {
+  color: #00f2fe;
+  font-weight: 600;
+}
+
+.progress-bar-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.01);
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00f2fe, #4facfe);
+  border-radius: 3px;
+  box-shadow: 0 0 8px #00f2fe;
+  transition: width 0.3s ease;
+}
+
+.progress-bar-track.paused .progress-bar-fill {
+  background: linear-gradient(90deg, #ffcc00, #ff9900);
+  box-shadow: 0 0 4px #ffcc00;
+}
+
+.progress-bar-track.complete .progress-bar-fill {
+  background: linear-gradient(90deg, var(--color-nominal), #00cc6a);
+  box-shadow: 0 0 8px var(--color-nominal);
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.telemetry-title {
+  grid-column: span 2;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.05rem;
+  margin-bottom: 2px;
+}
+
+.telemetry-card {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: background-color 0.2s;
+}
+
+.telemetry-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.telemetry-card-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.telemetry-card-value {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #00f2fe;
+}
+
 

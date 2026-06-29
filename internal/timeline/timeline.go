@@ -57,6 +57,13 @@ func (t *Timeline) Len() int {
 	return len(t.entries)
 }
 
+// Truncate clears all entries from the log.
+func (t *Timeline) Truncate() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.entries = make([]Entry, 0)
+}
+
 // Last returns the last event, or nil if the log is empty.
 // The returned event is a copy; modifications to it do not affect the log.
 // Note: Payload should still be treated as read-only to preserve the

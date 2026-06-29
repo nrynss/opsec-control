@@ -38,7 +38,7 @@ func TestRegisterAndState(t *testing.T) {
 	bus := &mockBus{}
 	log := &mockLog{}
 
-	srv := New(store, bus, log, nil, nil, nil, nil)
+	srv := New(store, bus, log, nil, nil, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -72,7 +72,7 @@ func TestPerceptionNil(t *testing.T) {
 	bus := &mockBus{}
 	log := &mockLog{}
 
-	srv := New(store, bus, log, nil, nil, nil, nil)
+	srv := New(store, bus, log, nil, nil, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -96,7 +96,7 @@ func TestPerceptionRawAndPublish(t *testing.T) {
 		},
 	}
 
-	srv := New(store, bus, log, nil, mp, nil, nil)
+	srv := New(store, bus, log, nil, mp, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -124,7 +124,7 @@ func TestPerceptionMultipart(t *testing.T) {
 	log := &mockLog{}
 	mp := &mockPerception{events: []contracts.Event{{ID: "mp1", Type: contracts.EventBuildingCollapsed, Confidence: 0.88}}}
 
-	srv := New(store, bus, log, nil, mp, nil, nil)
+	srv := New(store, bus, log, nil, mp, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -155,7 +155,7 @@ func TestPerceptionBadSourceAndError(t *testing.T) {
 	log := &mockLog{}
 	mp := &mockPerception{err: context.DeadlineExceeded} // simulate failure
 
-	srv := New(store, bus, log, nil, mp, nil, nil)
+	srv := New(store, bus, log, nil, mp, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -190,7 +190,7 @@ func TestPerceptionPayloadTooLarge(t *testing.T) {
 	log := &mockLog{}
 	mp := &mockPerception{events: []contracts.Event{{ID: "big", Type: contracts.EventRoadBlocked, Confidence: 0.5}}}
 
-	srv := New(store, bus, log, nil, mp, nil, nil)
+	srv := New(store, bus, log, nil, mp, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -214,7 +214,7 @@ func TestScenarioControlStubs(t *testing.T) {
 	bus := &mockBus{}
 	log := &mockLog{}
 
-	srv := New(store, bus, log, nil, nil, nil, nil)
+	srv := New(store, bus, log, nil, nil, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -285,7 +285,7 @@ func TestProviderNil(t *testing.T) {
 	bus := &mockBus{}
 	log := &mockLog{}
 
-	srv := New(store, bus, log, nil, nil, nil, nil)
+	srv := New(store, bus, log, nil, nil, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -314,7 +314,7 @@ func TestProviderGetSetBroadcast(t *testing.T) {
 	ps := &mockProviderSwitcher{p: "cerebras"}
 	bc := &mockBcast{}
 
-	srv := New(store, bus, log, nil, nil, ps, bc)
+	srv := New(store, bus, log, nil, nil, ps, bc, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -370,7 +370,7 @@ func TestProviderBadInput(t *testing.T) {
 	log := &mockLog{}
 	ps := &mockProviderSwitcher{p: "cerebras"}
 
-	srv := New(store, bus, log, nil, nil, ps, nil)
+	srv := New(store, bus, log, nil, nil, ps, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 
@@ -401,7 +401,7 @@ func TestProviderPostWithNilBcast(t *testing.T) {
 	log := &mockLog{}
 	ps := &mockProviderSwitcher{p: "cerebras"}
 
-	srv := New(store, bus, log, nil, nil, ps, nil)
+	srv := New(store, bus, log, nil, nil, ps, nil, nil, nil)
 	mux := http.NewServeMux()
 	srv.Register(mux)
 

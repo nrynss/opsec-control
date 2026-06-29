@@ -218,3 +218,22 @@ func TestPayloadCloneIsNilSafe(t *testing.T) {
 		t.Fatalf("nil payload should remain nil after clone")
 	}
 }
+
+func TestTruncate(t *testing.T) {
+	tl := New()
+	tl.Append(contracts.Event{ID: "e1", Timestamp: 100})
+	tl.Append(contracts.Event{ID: "e2", Timestamp: 200})
+
+	if tl.Len() != 2 {
+		t.Fatalf("expected 2 entries before truncate, got %d", tl.Len())
+	}
+
+	tl.Truncate()
+
+	if tl.Len() != 0 {
+		t.Fatalf("expected 0 entries after truncate, got %d", tl.Len())
+	}
+	if tl.Last() != nil {
+		t.Fatalf("expected Last() to be nil after truncate")
+	}
+}
