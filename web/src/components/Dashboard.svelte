@@ -6,6 +6,7 @@
   import CellPanel from './CellPanel.svelte';
   import MatrixFeed from './MatrixFeed.svelte';
   import PlaybackControl from './PlaybackControl.svelte';
+  import PerceptionUpload from './PerceptionUpload.svelte';
 
   // State snapshot
   var state = {
@@ -199,7 +200,20 @@
 
     if (kind === "cop" || (!kind && payload.overallRisk && payload.prioritizedActions)) {
       cop = payload;
-      metrics.activeCells = 0; // Reset HUD indicator
+      if (payload.metrics) {
+        metrics.activeCells = payload.metrics.cellCount || 0;
+        metrics.tokensPerSec = payload.metrics.aggregateTokensPerSec || 0;
+        metrics.latencyMs = payload.metrics.fanOutLatencyMs || 0;
+        metrics.tickTokens = payload.metrics.totalTokensOut || 0;
+      } else {
+        metrics.activeCells = 0;
+      }
+      
+      // Reset statuses to idle before setting woken cells to done
+      for (var k in cellStatuses) {
+        cellStatuses[k] = "idle";
+      }
+
       if (payload.cellOutputs) {
         payload.cellOutputs.forEach(out => {
           cellStatuses[out.agent] = "done";
@@ -217,6 +231,16 @@
 
     if (kind === "event" || (!kind && payload.id && payload.type)) {
       timelineEvents = [payload, ...timelineEvents];
+      if (payload.source !== "ambient") {
+        var woken = classifyEvent(payload.type);
+        for (var k in cellStatuses) {
+          cellStatuses[k] = "idle";
+        }
+        woken.forEach(cell => {
+          cellStatuses[cell] = "analyzing";
+        });
+        metrics.activeCells = woken.length;
+      }
     }
   }
 
@@ -423,6 +447,63 @@
       }, 150);
     }, 380);
   }
+
+  function classifyEvent(type) {
+    switch (type) {
+      case "MainshockOccurred":
+        return ["Intelligence", "Infrastructure", "Medical", "Population", "Communications"];
+      case "AftershockOccurred":
+        return ["Intelligence", "Infrastructure", "Population"];
+      case "DamStressElevated":
+      case "DamBreached":
+      case "LeveeOvertopping":
+      case "LeveeBreached":
+      case "FloodExtentUpdated":
+        return ["Intelligence", "Infrastructure", "Population"];
+      case "BridgeDamaged":
+      case "BridgeClosed":
+      case "BridgeCollapsed":
+      case "RoadBlocked":
+      case "TunnelClosed":
+        return ["Infrastructure", "Population"];
+      case "PowerFailure":
+      case "PowerRestored":
+        return ["Infrastructure", "Communications"];
+      case "HospitalStrained":
+      case "HospitalCritical":
+      case "HospitalOverCapacity":
+      case "MedicalEmergency":
+        return ["Medical", "Population"];
+      case "ShelterStrained":
+      case "ShelterExceeded":
+        return ["Population"];
+      default:
+        return [];
+    }
+  }
+
+  function handleUploading() {
+    for (var k in cellStatuses) {
+      cellStatuses[k] = "analyzing";
+    }
+    metrics.activeCells = 5;
+    metrics.tokensPerSec = 0;
+    metrics.latencyMs = 0;
+    metrics.tickTokens = 0;
+  }
+
+  function handlePerceptionEvents(e) {
+    var evCount = e.detail ? e.detail.length : 0;
+    addLog("PERCEPTION", `Tactical image ingested. Vision interpreted ${evCount} emergency events.`);
+  }
+
+  function handlePerceptionError(e) {
+    addLog("PERCEPTION_ERR", `Ingest failed: ${e.detail}`);
+    for (var k in cellStatuses) {
+      cellStatuses[k] = "idle";
+    }
+    metrics.activeCells = 0;
+  }
 </script>
 
 <div class="dashboard-container">
@@ -432,6 +513,8 @@
   <!-- Left Sidebar: Controller and Timeline -->
   <div class="controls-area">
     <PlaybackControl {state} activeEvent={timelineEvents[0]} />
+    
+    <PerceptionUpload {state} on:uploading={handleUploading} on:events={handlePerceptionEvents} on:error={handlePerceptionError} />
     
     <!-- Timeline Event log -->
     <div class="control-panel" style="flex: 1; display: flex; flex-direction: column;">
