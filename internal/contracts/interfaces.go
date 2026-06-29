@@ -65,12 +65,14 @@ type LLMRequest struct {
 }
 
 // LLMResponse carries the completion plus the throughput metrics shown on the
-// HUD (SPEC §15.1).
+// HUD (SPEC §15.1). LatencyMS is the wall-clock for the call (real client: the
+// HTTP round-trip; mock: the simulated inference time).
 type LLMResponse struct {
 	Content      string  `json:"content"`
 	TokensIn     int     `json:"tokensIn"`
 	TokensOut    int     `json:"tokensOut"`
 	TokensPerSec float64 `json:"tokensPerSec"`
+	LatencyMS    int64   `json:"latencyMs"`
 }
 
 // Perception turns a sensor image into structured events (SPEC §6, §14.4).

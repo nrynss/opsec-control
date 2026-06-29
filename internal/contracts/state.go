@@ -34,6 +34,7 @@ type WorldState struct {
 	FireZones map[FireZoneID]FireZone `json:"fireZones"`
 	Flood     Flood                   `json:"flood"`
 	Resources map[ResourceID]Resource `json:"resources"`
+	Roads     map[RoadID]Road         `json:"roads"`
 }
 
 // --- Sectors & utilities (§8.2, §8.4) ---
@@ -83,6 +84,25 @@ type Bridge struct {
 	ID     BridgeID     `json:"id"`
 	Name   string       `json:"name"`
 	Status BridgeStatus `json:"status"`
+}
+
+// --- Roads (§8.3, §8.4) ---
+
+// RoadStatus: open ↔ congested ↔ blocked (bidirectional, §8.4).
+type RoadStatus string
+
+const (
+	RoadOpen      RoadStatus = "open"
+	RoadCongested RoadStatus = "congested"
+	RoadBlocked   RoadStatus = "blocked"
+)
+
+type RoadID string
+
+type Road struct {
+	ID     RoadID     `json:"id"`
+	Name   string     `json:"name"`
+	Status RoadStatus `json:"status"`
 }
 
 // --- Dam & levee (§8.3, §8.4) ---

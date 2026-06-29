@@ -29,6 +29,7 @@ const (
 	EventBuildingCollapsed EventType = "BuildingCollapsed"
 	EventBridgeDamaged     EventType = "BridgeDamaged"
 	EventBridgeClosed      EventType = "BridgeClosed"
+	EventBridgeCollapsed   EventType = "BridgeCollapsed"
 	EventRoadBlocked       EventType = "RoadBlocked"
 	EventTunnelClosed      EventType = "TunnelClosed"
 	EventDamStressElevated EventType = "DamStressElevated"
@@ -36,6 +37,7 @@ const (
 
 	// Utility (→ Intelligence/Infrastructure).
 	EventPowerFailure    EventType = "PowerFailure"
+	EventPowerDegraded   EventType = "PowerDegraded"
 	EventGasLeakDetected EventType = "GasLeakDetected"
 	EventWaterMainBreak  EventType = "WaterMainBreak"
 	EventCommsOutage     EventType = "CommsOutage"

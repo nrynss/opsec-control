@@ -50,7 +50,10 @@ func TestWorldStateRoundTrip(t *testing.T) {
 		Bridges: map[contracts.BridgeID]contracts.Bridge{
 			"vora": {ID: "vora", Name: "Vora Bridge", Status: contracts.BridgeClosed},
 		},
-		Dam:   contracts.Dam{ID: "mainor", Status: contracts.DamStressed, ReservoirPct: 0.82, StressRating: 0.6},
+		Dam: contracts.Dam{ID: "mainor", Status: contracts.DamStressed, ReservoirPct: 0.82, StressRating: 0.6},
+		Roads: map[contracts.RoadID]contracts.Road{
+			"r1": {ID: "r1", Name: "Main Arterial", Status: contracts.RoadBlocked},
+		},
 		Levee: contracts.Levee{ID: "southport", Status: contracts.LeveeIntact, Height: 4.5, Integrity: 1},
 		Hospitals: map[contracts.HospitalID]contracts.Hospital{
 			"central-general": {ID: "central-general", Name: "Central General", Sector: "central",
@@ -84,7 +87,12 @@ func TestCOPRoundTrip(t *testing.T) {
 		},
 		CellOutputs: []contracts.CellOutput{
 			{Cell: contracts.CellInfrastructure, Summary: "Vora + Iron closed", RiskLevel: contracts.RiskHigh,
-				Confidence: 0.91, StateVersion: 42, Recommendations: []string{"Reroute via South Span"}, Evidence: []string{"bridge feed"}},
+				Confidence: 0.91, StateVersion: 42, Recommendations: []string{"Reroute via South Span"}, Evidence: []string{"bridge feed"},
+				Metrics: contracts.CellMetrics{TokensIn: 312, TokensOut: 208, TokensPerSec: 1750.4, LatencyMS: 119}},
+		},
+		Metrics: contracts.COPMetrics{
+			FanOutLatencyMS: 487, TotalTokensIn: 1480, TotalTokensOut: 1020,
+			PeakTokensPerSec: 1820.5, AggregateTokensPerSec: 2094.4, CellCount: 5,
 		},
 	}
 	if got := roundJSON(t, in); !reflect.DeepEqual(got, in) {
@@ -126,9 +134,9 @@ func TestRejectionErrorIsError(t *testing.T) {
 func TestEventTypeUniqueness(t *testing.T) {
 	all := []contracts.EventType{
 		contracts.EventMainshockOccurred, contracts.EventAftershockOccurred, contracts.EventAftershockForecastUpdated,
-		contracts.EventBuildingCollapsed, contracts.EventBridgeDamaged, contracts.EventBridgeClosed,
+		contracts.EventBuildingCollapsed, contracts.EventBridgeDamaged, contracts.EventBridgeClosed, contracts.EventBridgeCollapsed,
 		contracts.EventRoadBlocked, contracts.EventTunnelClosed, contracts.EventDamStressElevated, contracts.EventLeveeBreached,
-		contracts.EventPowerFailure, contracts.EventGasLeakDetected, contracts.EventWaterMainBreak, contracts.EventCommsOutage,
+		contracts.EventPowerFailure, contracts.EventPowerDegraded, contracts.EventGasLeakDetected, contracts.EventWaterMainBreak, contracts.EventCommsOutage,
 		contracts.EventFireIgnited, contracts.EventFireSpread, contracts.EventFireContained,
 		contracts.EventFloodExtentUpdated,
 		contracts.EventCasualtyReportUpdated, contracts.EventMassCasualtyIncident, contracts.EventHospitalCapacityChanged,
