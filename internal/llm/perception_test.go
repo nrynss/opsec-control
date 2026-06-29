@@ -79,3 +79,28 @@ func TestPerceptionMock(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeEventType(t *testing.T) {
+	tests := []struct {
+		input string
+		want  contracts.EventType
+	}{
+		{input: "BuildingCollapsed", want: contracts.EventBuildingCollapsed},
+		{input: "building_collapsed", want: contracts.EventBuildingCollapsed},
+		{input: "building-collapsed", want: contracts.EventBuildingCollapsed},
+		{input: "building collapsed", want: contracts.EventBuildingCollapsed},
+		{input: "BUILDING_COLLAPSED", want: contracts.EventBuildingCollapsed},
+		{input: "levee_breach", want: contracts.EventLeveeBreached},
+		{input: "LeveeBreached", want: contracts.EventLeveeBreached},
+		{input: "bridge_closed", want: contracts.EventBridgeClosed},
+		{input: "bridgecollapse", want: contracts.EventBridgeCollapsed},
+		{input: "SomeUnknownType", want: contracts.EventType("SomeUnknownType")},
+	}
+
+	for _, tt := range tests {
+		got := normalizeEventType(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeEventType(%q) = %q; want %q", tt.input, got, tt.want)
+		}
+	}
+}

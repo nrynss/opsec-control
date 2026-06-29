@@ -215,9 +215,9 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 	}
 
 	var rawEvents []struct {
-		Type       contracts.EventType `json:"type"`
-		Confidence float64             `json:"confidence"`
-		Payload    json.RawMessage     `json:"payload"`
+		Type       string          `json:"type"`
+		Confidence float64         `json:"confidence"`
+		Payload    json.RawMessage `json:"payload"`
 	}
 
 	if err := json.Unmarshal([]byte(apiResp.Choices[0].Message.Content), &rawEvents); err != nil {
@@ -234,11 +234,82 @@ func (c *Client) interpretReal(ctx context.Context, input contracts.ImageInput) 
 			ID:         contracts.EventID(fmt.Sprintf("evt-perc-%s-%d", hashStr, i)),
 			Timestamp:  0, // Set by the runner
 			Source:     fmt.Sprintf("Cerebras-Perception-%s", input.Source),
-			Type:       re.Type,
+			Type:       normalizeEventType(re.Type),
 			Confidence: re.Confidence,
 			Payload:    re.Payload,
 		})
 	}
 
 	return events, nil
+}
+
+var canonicalEventTypes = []contracts.EventType{
+	contracts.EventMainshockOccurred,
+	contracts.EventAftershockOccurred,
+	contracts.EventAftershockForecastUpdated,
+	contracts.EventBuildingCollapsed,
+	contracts.EventBridgeDamaged,
+	contracts.EventBridgeClosed,
+	contracts.EventBridgeCollapsed,
+	contracts.EventRoadBlocked,
+	contracts.EventTunnelClosed,
+	contracts.EventDamStressElevated,
+	contracts.EventLeveeBreached,
+	contracts.EventPowerFailure,
+	contracts.EventPowerDegraded,
+	contracts.EventGasLeakDetected,
+	contracts.EventWaterMainBreak,
+	contracts.EventCommsOutage,
+	contracts.EventFireIgnited,
+	contracts.EventFireSpread,
+	contracts.EventFireContained,
+	contracts.EventFloodExtentUpdated,
+	contracts.EventCasualtyReportUpdated,
+	contracts.EventMassCasualtyIncident,
+	contracts.EventHospitalCapacityChanged,
+	contracts.EventCitizenDistressCall,
+	contracts.EventPersonsTrapped,
+	contracts.EventEvacuationOrdered,
+	contracts.EventShelterOccupancyChanged,
+	contracts.EventShelterFull,
+	contracts.EventSatelliteImageReceived,
+	contracts.EventDroneImageReceived,
+	contracts.EventResourceDeployed,
+	contracts.EventResourceDepleted,
+	contracts.EventRejected,
+}
+
+var eventTypeNormalizationMap = func() map[string]contracts.EventType {
+	m := make(map[string]contracts.EventType)
+	for _, et := range canonicalEventTypes {
+		normalized := normalizeString(string(et))
+		m[normalized] = et
+	}
+	// Add specific common aliases/abbreviations
+	m["leveebreach"] = contracts.EventLeveeBreached
+	m["bridgecollapse"] = contracts.EventBridgeCollapsed
+	m["buildingcollapse"] = contracts.EventBuildingCollapsed
+	m["roadblock"] = contracts.EventRoadBlocked
+	m["gasleak"] = contracts.EventGasLeakDetected
+	m["watermainbreakage"] = contracts.EventWaterMainBreak
+	m["waterbreak"] = contracts.EventWaterMainBreak
+	m["commsfailure"] = contracts.EventCommsOutage
+	m["poweroutage"] = contracts.EventPowerFailure
+	return m
+}()
+
+func normalizeString(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, " ", "")
+	return s
+}
+
+func normalizeEventType(input string) contracts.EventType {
+	norm := normalizeString(input)
+	if et, ok := eventTypeNormalizationMap[norm]; ok {
+		return et
+	}
+	return contracts.EventType(input)
 }
