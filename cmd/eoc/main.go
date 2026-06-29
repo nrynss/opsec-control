@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -132,6 +133,17 @@ func main() {
 	speed := flag.Float64("speed", 4.0, "simulation playback speed (1.0 = real scenario seconds)")
 	flag.Parse()
 
+	// Honor $PORT (Cloud Run contract), falling back to -addr flag / 8080.
+	if port := os.Getenv("PORT"); port != "" {
+		*addr = ":" + port
+	}
+
+	// WEB_DIR points at the built web dashboard (default "web/dist").
+	webDir := os.Getenv("WEB_DIR")
+	if webDir == "" {
+		webDir = "web/dist"
+	}
+
 	raw := embeddedScenario
 	if *scenarioPath != "" {
 		b, err := os.ReadFile(*scenarioPath)
@@ -155,10 +167,14 @@ func main() {
 
 	// Mock mode kicks in automatically when CEREBRAS_API_KEY is unset or LLM_MOCK=true.
 	llmClient := llm.NewClient(llm.Config{})
+	// All 6 cells registered (2026-06-29 roster decision — HANDOFF §8).
+	// The llm semaphore (maxConcurrency=4) queues the 5th specialist under the 4-cap.
 	cells := map[contracts.CellKind]contracts.Cell{
+		contracts.CellIntelligence:   agents.NewIntelligence(llmClient),
 		contracts.CellInfrastructure: agents.NewInfrastructure(llmClient),
 		contracts.CellMedical:        agents.NewMedical(llmClient),
 		contracts.CellPopulation:     agents.NewPopulation(llmClient),
+		contracts.CellCommunications: agents.NewCommunications(llmClient),
 		contracts.CellCommander:      agents.NewCommander(llmClient),
 	}
 	orch := orchestrator.NewEngine(cells)
@@ -169,8 +185,16 @@ func main() {
 
 	// --- HTTP/WS edge ---
 	mux := http.NewServeMux()
+	// Wire perception: llmClient implements contracts.Perception.
 	api.New(store, bus, tl, cop, llmClient).Register(mux)
-	mux.Handle("/stream", wsSrv.Handler())
+	mux.Handle("GET /stream", wsSrv.Handler())
+
+	// Serve the static web dashboard at / (single-origin — HANDOFF §8 deploy decision).
+	// API routes + /stream take priority; the file server falls through for GET /.
+	webRoot := http.FileServer(http.Dir(filepath.Clean(webDir)))
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		webRoot.ServeHTTP(w, r)
+	})
 	httpSrv := &http.Server{Addr: *addr, Handler: mux}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
