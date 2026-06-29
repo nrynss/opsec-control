@@ -85,3 +85,47 @@ type ImageInput struct {
 	Source string `json:"source"` // "satellite" | "drone"
 	Data   []byte `json:"data"`
 }
+
+// --- P19: Simulation controls and stats (additive §0.5 contract change) ---
+
+// SimulationInfo provides scenario name and time bounds (start/end) for the
+// UI simulation clock/progress bar. All times are SimTime (scenario seconds).
+type SimulationInfo struct {
+	Name      string  `json:"name"`
+	StartTime SimTime `json:"startTime"`
+	EndTime   SimTime `json:"endTime"`
+}
+
+// SimulationStats is returned by GET /scenario/stats. It drives the live
+// metrics widget (wall elapsed, events replayed, tokens, inferences) and
+// progress display. WallElapsed is milliseconds for UI display only (never
+// used for logic or determinism).
+type SimulationStats struct {
+	Status         string  `json:"status"` // "running" | "paused" | "complete"
+	CurrentTime    SimTime `json:"currentTime"`
+	WallElapsed    int64   `json:"wallElapsed"` // ms (display only)
+	EventsReplayed int     `json:"eventsReplayed"`
+	TokensIn       int     `json:"tokensIn"`
+	TokensOut      int     `json:"tokensOut"`
+	Inferences     int     `json:"inferences"` // LLM calls / completions
+	Speed          float64 `json:"speed"`
+}
+
+// SimulationController allows the API edge to invoke simulation controls
+// (reset, playback) and query info without importing the simulation package.
+// Implemented by the cmd/eoc integration root.
+type SimulationController interface {
+	Reset()
+	Pause()
+	Resume()
+	Step() (bool, error)
+	SetSpeed(float64)
+	Info() SimulationInfo
+}
+
+// TokenStatsProvider provides aggregated LLM usage counters for stats
+// without leaking llm package types or impl details.
+type TokenStatsProvider interface {
+	TotalTokens() (in, out int)
+	TotalRequests() int
+}
