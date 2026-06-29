@@ -129,6 +129,13 @@ func (e *Engine) CurrentTime() contracts.SimTime {
 	return e.current
 }
 
+// Speed returns current playback speed.
+func (e *Engine) Speed() float64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.speed
+}
+
 // Step publishes at most the next event from the scenario and advances logical time.
 // Returns (true, nil) if an event was published, (false, nil) if at end or no scenario.
 func (e *Engine) Step() (bool, error) {
