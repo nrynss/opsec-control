@@ -350,5 +350,3 @@ func (e *Engine) Info() contracts.SimulationInfo {
 		EndTime:   end,
 	}
 }
-
-
