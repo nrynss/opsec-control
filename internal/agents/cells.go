@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/nrynss/opsec-control/internal/contracts"
 )
@@ -18,7 +19,9 @@ func (b *cellBase) Kind() contracts.CellKind {
 	return b.kind
 }
 
-func (b *cellBase) executeLLM(ctx context.Context, systemPrompt, userPrompt string) (contracts.CellOutput, error) {
+// callLLM performs a single LLM call with the given prompts and schema, returning
+// the parsed CellOutput and the raw LLMResponse (for metrics).
+func (b *cellBase) callLLM(ctx context.Context, systemPrompt, userPrompt string) (contracts.CellOutput, contracts.LLMResponse, error) {
 	schema := json.RawMessage(`{
 		"type": "object",
 		"properties": {
@@ -38,19 +41,116 @@ func (b *cellBase) executeLLM(ctx context.Context, systemPrompt, userPrompt stri
 		Schema: schema,
 	})
 	if err != nil {
-		return contracts.CellOutput{}, fmt.Errorf("llm completion failed: %w", err)
+		return contracts.CellOutput{}, resp, fmt.Errorf("llm completion failed: %w", err)
 	}
 
 	var out contracts.CellOutput
 	err = json.Unmarshal([]byte(resp.Content), &out)
 	if err != nil {
-		return contracts.CellOutput{}, fmt.Errorf("llm output failed schema validation: %w", err)
+		return contracts.CellOutput{}, resp, fmt.Errorf("llm output failed schema validation: %w", err)
 	}
 
 	if out.Summary == "" || out.RiskLevel == "" {
-		return contracts.CellOutput{}, fmt.Errorf("llm output missing required content")
+		return contracts.CellOutput{}, resp, fmt.Errorf("llm output missing required content")
 	}
 
+	return out, resp, nil
+}
+
+// shouldCritique returns true if the LLM_CRITIQUE env var is set to a truthy value.
+// Off by default (for tests and to keep single-turn unless explicitly enabled).
+func (b *cellBase) shouldCritique() bool {
+	switch os.Getenv("LLM_CRITIQUE") {
+	case "1", "true", "TRUE", "yes", "YES":
+		return true
+	}
+	return false
+}
+
+// aggregateMetrics sums tokens and latency across turns. Computes an
+// aggregate tokens/sec from total output tokens over total latency.
+func aggregateMetrics(a, b contracts.CellMetrics) contracts.CellMetrics {
+	res := contracts.CellMetrics{
+		TokensIn:  a.TokensIn + b.TokensIn,
+		TokensOut: a.TokensOut + b.TokensOut,
+		LatencyMS: a.LatencyMS + b.LatencyMS,
+	}
+	if res.LatencyMS > 0 {
+		res.TokensPerSec = float64(res.TokensOut) / (float64(res.LatencyMS) / 1000.0)
+	} else {
+		res.TokensPerSec = b.TokensPerSec
+	}
+	return res
+}
+
+// executeLLM performs the (plan) call and optionally a sequential critique
+// pass (when LLM_CRITIQUE env is set). Metrics are populated from the LLM
+// response(s) and aggregated for multi-turn. On critique failure, gracefully
+// falls back to the initial draft.
+func (b *cellBase) executeLLM(ctx context.Context, systemPrompt, userPrompt string) (contracts.CellOutput, error) {
+	out, resp, err := b.callLLM(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return contracts.CellOutput{}, err
+	}
+
+	metrics := contracts.CellMetrics{
+		TokensIn:     resp.TokensIn,
+		TokensOut:    resp.TokensOut,
+		TokensPerSec: resp.TokensPerSec,
+		LatencyMS:    resp.LatencyMS,
+	}
+
+	if b.shouldCritique() {
+		// Serialize a clean draft (without metrics, which are agent-side)
+		draft := struct {
+			Summary         string   `json:"summary"`
+			RiskLevel       string   `json:"riskLevel"`
+			Confidence      float64  `json:"confidence"`
+			StateVersion    int64    `json:"stateVersion"`
+			Recommendations []string `json:"recommendations"`
+			Evidence        []string `json:"evidence"`
+		}{
+			Summary:         out.Summary,
+			RiskLevel:       string(out.RiskLevel),
+			Confidence:      out.Confidence,
+			StateVersion:    int64(out.StateVersion),
+			Recommendations: out.Recommendations,
+			Evidence:        out.Evidence,
+		}
+		draftJSON, marshalErr := json.Marshal(draft)
+		if marshalErr != nil {
+			// extremely unlikely; graceful fallback
+			out.Metrics = metrics
+			return out, nil
+		}
+
+		critiqueUser := fmt.Sprintf(`Original task:
+%s
+
+Initial draft:
+%s
+
+Critique the draft for accuracy (vs provided data), completeness, actionability, and schema compliance.
+Output ONLY one refined JSON object in the exact same schema. No extra text or markdown.`, userPrompt, string(draftJSON))
+
+		refined, refinedResp, cerr := b.callLLM(ctx, systemPrompt, critiqueUser)
+		if cerr != nil {
+			// graceful fallback to draft
+			out.Metrics = metrics
+			return out, nil
+		}
+
+		refinedMetrics := contracts.CellMetrics{
+			TokensIn:     refinedResp.TokensIn,
+			TokensOut:    refinedResp.TokensOut,
+			TokensPerSec: refinedResp.TokensPerSec,
+			LatencyMS:    refinedResp.LatencyMS,
+		}
+		refined.Metrics = aggregateMetrics(metrics, refinedMetrics)
+		return refined, nil
+	}
+
+	out.Metrics = metrics
 	return out, nil
 }
 
@@ -155,6 +255,65 @@ func (c *commanderCell) Analyze(ctx context.Context, in contracts.CellInput) (co
 			Levee contracts.Levee
 			Flood contracts.Flood
 		}{in.Snapshot.Dam, in.Snapshot.Levee, in.Snapshot.Flood}, in.Peers, in.Trigger)
+
+	out, err := c.executeLLM(ctx, system, user)
+	if err != nil {
+		return contracts.CellOutput{}, err
+	}
+
+	out.Cell = c.Kind()
+	out.StateVersion = in.StateVersion
+	return out, nil
+}
+
+// --- Intelligence Cell ---
+
+type intelligenceCell struct {
+	cellBase
+}
+
+func NewIntelligence(llm contracts.LLMClient) contracts.Cell {
+	return &intelligenceCell{
+		cellBase: cellBase{kind: contracts.CellIntelligence, llm: llm},
+	}
+}
+
+func (c *intelligenceCell) Analyze(ctx context.Context, in contracts.CellInput) (contracts.CellOutput, error) {
+	system := "You are the Intelligence Cell. Analyze weather, seismic events, flood modelling, satellite/drone imagery, damage assessment, and hazard prediction. Provide clear situational awareness and forecasts."
+	user := fmt.Sprintf("Sectors: %+v\nBridges: %+v\nDam: %+v\nLevee: %+v\nFlood: %+v\nTrigger Event: %+v",
+		in.Snapshot.Sectors, in.Snapshot.Bridges, in.Snapshot.Dam, in.Snapshot.Levee, in.Snapshot.Flood, in.Trigger)
+
+	out, err := c.executeLLM(ctx, system, user)
+	if err != nil {
+		return contracts.CellOutput{}, err
+	}
+
+	out.Cell = c.Kind()
+	out.StateVersion = in.StateVersion
+	return out, nil
+}
+
+// --- Communications Cell ---
+
+type communicationsCell struct {
+	cellBase
+}
+
+func NewCommunications(llm contracts.LLMClient) contracts.Cell {
+	return &communicationsCell{
+		cellBase: cellBase{kind: contracts.CellCommunications, llm: llm},
+	}
+}
+
+func (c *communicationsCell) Analyze(ctx context.Context, in contracts.CellInput) (contracts.CellOutput, error) {
+	system := "You are the Communications Cell. Synthesize world state and all specialist reports into concise public advisories, internal briefings, and situation summaries."
+	user := fmt.Sprintf("Key State (Dam/Levee/Flood/Sectors): %+v\nSpecialist Reports: %+v\nTrigger Event: %+v",
+		struct {
+			Dam     contracts.Dam
+			Levee   contracts.Levee
+			Flood   contracts.Flood
+			Sectors map[contracts.SectorID]contracts.Sector
+		}{in.Snapshot.Dam, in.Snapshot.Levee, in.Snapshot.Flood, in.Snapshot.Sectors}, in.Peers, in.Trigger)
 
 	out, err := c.executeLLM(ctx, system, user)
 	if err != nil {
