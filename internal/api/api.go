@@ -76,6 +76,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /perception", s.handlePostPerception)
 	mux.HandleFunc("POST /scenario/load", s.handleScenarioLoad)
 	mux.HandleFunc("POST /scenario/reset", s.handleScenarioReset)
+	mux.HandleFunc("POST /scenario/pause", s.handleScenarioPause)
+	mux.HandleFunc("POST /scenario/resume", s.handleScenarioResume)
+	mux.HandleFunc("POST /scenario/step", s.handleScenarioStep)
+	mux.HandleFunc("POST /scenario/speed", s.handleScenarioSpeed)
 }
 
 // handleState returns the current world state.
@@ -127,15 +131,67 @@ func (s *Server) handlePostEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// handleScenarioLoad placeholder (for MVD, may be no-op or forward).
-func (s *Server) handleScenarioLoad(w http.ResponseWriter, r *http.Request) {
-	// In full impl would use scenario pkg, but for now stub.
-	w.WriteHeader(http.StatusNotImplemented)
+// respondWithScenarioStub is a helper for the MVD scenario control endpoints.
+// All scenario playback controls (load/reset/pause/resume/step/speed) are
+// intentionally no-ops here; the real engine lives in cmd/eoc + simulation.
+// Returns 202 Accepted + JSON so the frontend treats the calls as successful
+// (callEndpoint returns true) while we wait for real wiring in P6.
+func (s *Server) respondWithScenarioStub(w http.ResponseWriter, op string, extra ...map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	resp := map[string]any{
+		"status": "accepted",
+		"op":     op,
+		"note":   "MVD stub - no-op until wired in cmd/eoc",
+	}
+	if len(extra) > 0 {
+		for k, v := range extra[0] {
+			resp[k] = v
+		}
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// handleScenarioReset placeholder.
+func (s *Server) handleScenarioLoad(w http.ResponseWriter, r *http.Request) {
+	// Best-effort parse name for future real impl
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	extra := map[string]any{}
+	if body.Name != "" {
+		extra["name"] = body.Name
+	}
+	s.respondWithScenarioStub(w, "load", extra)
+}
+
 func (s *Server) handleScenarioReset(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+	s.respondWithScenarioStub(w, "reset")
+}
+
+func (s *Server) handleScenarioPause(w http.ResponseWriter, r *http.Request) {
+	s.respondWithScenarioStub(w, "pause")
+}
+
+func (s *Server) handleScenarioResume(w http.ResponseWriter, r *http.Request) {
+	s.respondWithScenarioStub(w, "resume")
+}
+
+func (s *Server) handleScenarioStep(w http.ResponseWriter, r *http.Request) {
+	s.respondWithScenarioStub(w, "step")
+}
+
+func (s *Server) handleScenarioSpeed(w http.ResponseWriter, r *http.Request) {
+	// Best-effort parse speed
+	var body struct {
+		Speed float64 `json:"speed"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	extra := map[string]any{}
+	if body.Speed != 0 {
+		extra["speed"] = body.Speed
+	}
+	s.respondWithScenarioStub(w, "speed", extra)
 }
 
 // handlePostPerception accepts a satellite/drone image via raw request body
@@ -230,5 +286,8 @@ func (s *Server) handlePostPerception(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]any{"accepted": len(events)})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"accepted": len(events),
+		"events":   events,
+	})
 }

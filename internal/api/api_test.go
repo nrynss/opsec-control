@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -205,5 +206,59 @@ func TestPerceptionPayloadTooLarge(t *testing.T) {
 	}
 	if len(bus.published) != 0 {
 		t.Errorf("oversized should not have published any events")
+	}
+}
+
+func TestScenarioControlStubs(t *testing.T) {
+	store := &mockStore{}
+	bus := &mockBus{}
+	log := &mockLog{}
+
+	srv := New(store, bus, log, nil, nil)
+	mux := http.NewServeMux()
+	srv.Register(mux)
+
+	endpoints := []string{
+		"/scenario/load",
+		"/scenario/reset",
+		"/scenario/pause",
+		"/scenario/resume",
+		"/scenario/step",
+		"/scenario/speed",
+	}
+	for _, ep := range endpoints {
+		req := httptest.NewRequest("POST", ep, nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusAccepted {
+			t.Errorf("%s: expected 202 Accepted, got %d", ep, w.Code)
+		}
+	}
+
+	// Verify load and speed accept their bodies gracefully and echo parsed values
+	loadBody := bytes.NewReader([]byte(`{"name": "cerebro-cascade"}`))
+	req := httptest.NewRequest("POST", "/scenario/load", loadBody)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("load with body: expected 202, got %d", w.Code)
+	}
+	var loadResp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&loadResp); err != nil || loadResp["name"] != "cerebro-cascade" {
+		t.Errorf("load response should echo name, got %+v err=%v", loadResp, err)
+	}
+
+	speedBody := bytes.NewReader([]byte(`{"speed": 4.5}`))
+	req = httptest.NewRequest("POST", "/scenario/speed", speedBody)
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("speed with body: expected 202, got %d", w.Code)
+	}
+	var speedResp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&speedResp); err != nil || speedResp["speed"] != 4.5 {
+		t.Errorf("speed response should echo speed, got %+v err=%v", speedResp, err)
 	}
 }
