@@ -13,6 +13,8 @@ import (
 	"github.com/nrynss/opsec-control/internal/orchestrator"
 	"github.com/nrynss/opsec-control/internal/scenario"
 	"github.com/nrynss/opsec-control/internal/state"
+	"github.com/nrynss/opsec-control/internal/simulation"
+	"github.com/nrynss/opsec-control/internal/timeline"
 )
 
 // fakeLLM returns a fixed, schema-valid CellOutput so the Cells/orchestrator are
@@ -110,6 +112,95 @@ func TestBusPathAppliesAllEvents(t *testing.T) {
 			time.Sleep(2 * time.Millisecond)
 		}
 	}
+}
+
+// TestFullSimulationControlLifecycle exercises the end-to-end "Forward -> Control -> Reset" flow.
+func TestFullSimulationControlLifecycle(t *testing.T) {
+	a, scn := newTestApp(t)
+	ctx := context.Background()
+
+	// 1. Wire up the eocSimController
+	bus := events.New(128)
+	tl := timeline.New()
+	stopTL := timeline.Listen(bus, tl)
+	defer stopTL()
+
+	sim := simulation.New(bus)
+	
+	ctrl := &eocSimController{
+		sim:       sim,
+		store:     a.store.(*state.Store),
+		tl:        tl,
+		initial:   scn.Initial,
+		copStore:  a.cop,
+		app:       a,
+		bus:       bus,
+		parentCtx: ctx,
+	}
+
+	// Start the reasoning loop
+	ctrl.startLoop()
+	defer ctrl.reasoningCancel()
+	defer ctrl.subCancel()
+
+	// 2. FORWARD PATH: Inject Anomaly
+	// Bridge Vora Collapsed - use the ID from the embedded scenario's initial state
+	anomalyEv := ev("e-collapse", 10, "sensor", contracts.EventBridgeCollapsed, `{"bridgeId":"B-VORA"}`)
+	bus.Publish(anomalyEv)
+
+	// Wait for state application and fan-out
+	deadline := time.After(2 * time.Second)
+	for a.store.Version() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for anomaly to apply")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if a.store.Version() != 1 {
+		t.Fatalf("expected version 1, got %d", a.store.Version())
+	}
+	if a.cop.Current().OverallRisk == "Low" {
+		t.Fatal("expected COP risk to be elevated after collapse")
+	}
+	if tl.Len() == 0 {
+		t.Fatal("timeline should have captured the event")
+	}
+
+	// 3. RESET PATH: "All Clear"
+	ctrl.Reset()
+
+	// Verify state reset
+	if a.store.Version() != 0 {
+		t.Fatalf("after reset version %d, want 0", a.store.Version())
+	}
+	if tl.Len() != 1 { // Only the "SystemReset" event should remain
+		t.Fatalf("after reset timeline len %d, want 1", tl.Len())
+	}
+	if a.cop.Current().OverallRisk != "Low" {
+		t.Fatal("after reset COP risk should be Low")
+	}
+
+	// 4. RE-INJECTION: Verify "seen" map was cleared
+	// Re-inject the SAME event ID. This must be accepted.
+	bus.Publish(anomalyEv)
+
+	deadline = time.After(2 * time.Second)
+	for a.store.Version() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for re-injected event to apply")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if a.store.Version() != 1 {
+		t.Fatalf("re-injection failed: version %d", a.store.Version())
+	}
+	t.Log("full lifecycle verified: anomaly -> reset -> re-injection")
 }
 
 func ev(id string, ts int, src string, typ contracts.EventType, payload string) contracts.Event {
