@@ -2,11 +2,11 @@
 
 An API-first, event-driven, multi-agent command platform where specialist AI **Cells** fire **simultaneously** the instant an anomaly is detected. Built on Cerebras wafer-scale inference (Gemma 4 31B) to process six reasoning loops in parallel, updating the command center faster than the disaster evolves.
 
-## ▶ Live Demo
+## ▶ Demo
 
-**[https://eoc.nryn.dev](https://eoc.nryn.dev)** — open in any modern browser. No install or sign-in required.
+> **No longer hosted.** `eoc.nryn.dev` was taken down on 25 Nov 2026, after the Cerebras × Google Gemma 4 hackathon. To run it yourself, build it from this repository.
 
-The site loads directly into the **Common Operational Picture (COP)** dashboard for *Cerebro*, a fictional city undergoing a cascading disaster (M6.8 mainshock, aftershocks, fire, and a levee breach).
+The site loaded directly into the **Common Operational Picture (COP)** dashboard for *Cerebro*, a fictional city undergoing a cascading disaster (M6.8 mainshock, aftershocks, fire, and a levee breach).
 
 ### 📺 Watch the Demo
 
